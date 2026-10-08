@@ -1,0 +1,105 @@
+{
+  "version": "talk-baseline-2026-10-07",
+  "note": "Dustin's intended-use profiles for a talk. These are subjective comparisons, not benchmarks, guarantees, or an inventory of every supported feature. Larger area is not better. The approaches can be combined.",
+  "dimensions": [
+    {"id":"humanWorker","label":"Human Worker","lines":["Human Worker"],"zero":"Difficult to assign a human work within the process.","hundred":"Work can be handed to humans as naturally as it can be given to AI.","meaning":"A human doing an assigned part of the work. Separate from supervising or redirecting agents."},
+    {"id":"replan","label":"Human Can Replan","lines":["Human Can","Replan"],"zero":"Direction is set upfront; ongoing human replanning is peripheral.","hundred":"Inspecting work, adjusting context, and changing direction are central to the experience.","meaning":"How naturally the human can redirect the process as understanding changes."},
+    {"id":"understandable","label":"Understandable","lines":["Understandable"],"zero":"Very difficult for a human to form a mental model of the process.","hundred":"Easy to form a mental model of roles, possible paths, and handoffs.","meaning":"Understanding how work will proceed. This does not imply predictable or correct results."},
+    {"id":"reuse","label":"Reuse","lines":["Reuse"],"zero":"A task-specific process is worked out for this particular task.","hundred":"The process is a maintained asset, repeatedly applied and adapted.","meaning":"Reuse of the task-level method, beyond reusing an individual prompt or tool."},
+    {"id":"budgets","label":"Budget Enforceable","lines":["Budget","Enforceable"],"zero":"Explicit resource allocation and enforcement receive little attention.","hundred":"Easy to enforce token, time, and money budgets across the run and its jobs.","meaning":"Control over resource use. A high score does not mean the process is cheap."},
+    {"id":"freedom","label":"Model/Harness Freedom","lines":["Model/Harness","Freedom"],"zero":"The process assumes a particular model and harness.","hundred":"Easy to choose and combine different models and harnesses by role.","meaning":"How naturally different models and harnesses can contribute to one process."},
+    {"id":"verifier","label":"Needs Strong Verifier","lines":["Needs Strong","Verifier"],"zero":"The process can proceed through methods and human judgment without a reliable automatic verifier.","hundred":"The intended mode of use depends heavily on reliably checking success automatically.","meaning":"Dependence on a strong automatic verifier, not the quality or amount of verification. High is not better."}
+  ],
+  "approaches": [
+    {
+      "id":"plain-harness","title":"Plain Harness","short":"Interactive coding, directed by the person at the keyboard.",
+      "signature":"Follow discoveries together","example":"An interactive coding session with a chosen harness and model.",
+      "tradeoff":"The human keeps the overall method in their head; coordination and reuse are mostly manual.",
+      "ratings":{
+        "humanWorker":{"score":50,"reason":"The person can write code, make decisions, and review work throughout the session. Assigning a distinct human job is mostly informal. This inherited score is worth revisiting now that worker and supervisor are separate concepts."},
+        "replan":{"score":100,"reason":"Redirection is central to interactive coding. The person can change instructions, bring in context, and follow discoveries as they happen."},
+        "understandable":{"score":25,"reason":"The user understands the request, but the agent develops much of its actual method at runtime. Visibility into a conversation does not make its future process explicit."},
+        "reuse":{"score":0,"reason":"The overall method emerges within the particular conversation. There is no maintained task-level process in this baseline."},
+        "budgets":{"score":25,"reason":"The person can choose a cheaper model, watch usage, and stop work. Deliberate allocation and enforcement across jobs remain mostly manual."},
+        "freedom":{"score":75,"reason":"The person can choose a harness and model. Coordinating several different harnesses or models across separate jobs takes manual work."},
+        "verifier":{"score":0,"reason":"Human inspection and judgment can guide progress. Evolving intent, taste, and exploratory work do not require an automatic success test."}
+      }
+    },
+    {
+      "id":"goal","title":"/goal","short":"Set an outcome and let the agent keep working toward it.",
+      "signature":"Persist toward a target","example":"Goal-driven, largely unattended execution inside a supporting coding harness.",
+      "tradeoff":"A weak success signal makes unattended progress and stopping difficult to trust.",
+      "ratings":{
+        "humanWorker":{"score":0,"reason":"The intended interaction is to define the goal and delegate. Regularly assigning work back to humans is peripheral to that mode."},
+        "replan":{"score":0,"reason":"The goal sets direction upfront and the run is mostly hands-off. This describes the intended experience, not an inability to interrupt or change a goal."},
+        "understandable":{"score":0,"reason":"The destination is stated, while the agent decides how to get there. A clear goal alone does not give the user a mental model of the execution path."},
+        "reuse":{"score":0,"reason":"Repeating a goal does not preserve a maintained, inspectable method for achieving it. The agent works out the process for each task."},
+        "budgets":{"score":0,"reason":"The central idea is continued work until the goal is satisfied. Explicit allocation across jobs is peripheral to this comparison; some implementations still have run caps."},
+        "freedom":{"score":50,"reason":"There is some choice of supporting harness and model, but a run generally operates inside the selected setup rather than mixing harnesses by role."},
+        "verifier":{"score":100,"reason":"For this talk's hands-off archetype, trustworthy automatic progress and success checks are central. This is dependence on a verifier, not a claim that goal modes always verify correctly."}
+      }
+    },
+    {
+      "id":"dynamic-workflows","title":"Dynamic Workflows","short":"Generate an executable process for the task at hand.",
+      "signature":"Make a task-specific process explicit","example":"The Claude Code dynamic-workflow example discussed in the talk; not every dynamic graph system.",
+      "tradeoff":"The generated process still needs inspection, and changing its shape during execution is less central than launching it.",
+      "ratings":{
+        "humanWorker":{"score":25,"reason":"Humans can review the generated process and its output. Ongoing human jobs play a smaller role in the intended end-to-end execution."},
+        "replan":{"score":25,"reason":"The script can be inspected and revised before launch or rerun. Collaboratively reshaping it while it runs is less central to the example being compared."},
+        "understandable":{"score":25,"reason":"An explicit script improves visibility, but the person still has to learn a newly generated process for each task."},
+        "reuse":{"score":25,"reason":"A generated script can be saved and rerun. Its starting point is the current task rather than a maintained library of methods."},
+        "budgets":{"score":0,"reason":"Explicit resource allocation and enforcement are peripheral to this example's intended experience. Stopping a run or having an incidental timeout does not earn a high score here."},
+        "freedom":{"score":25,"reason":"This score is scoped to the Claude Code example, with a relatively fixed harness and some model choice. It is not a general limit of generated programs."},
+        "verifier":{"score":0,"reason":"A generated process can execute its phases and finish without a global automatic success test. It can organize exploratory or judgment-driven work."}
+      }
+    },
+    {
+      "id":"workflows","title":"Workflows","short":"Follow a reusable, prompt-defined sequence of phases.",
+      "signature":"Carry a familiar method into the next task","example":"Research → Plan → Implement, or a prompt-defined development procedure.",
+      "tradeoff":"Prompts describe the method; following it still depends on the agents and the person managing the handoffs.",
+      "ratings":{
+        "humanWorker":{"score":50,"reason":"People contribute reviews and decisions at phase boundaries. Arbitrary human job assignment is less central than these recurring contributions."},
+        "replan":{"score":75,"reason":"Checkpoints provide natural places to adapt instructions and redirect work. The established phases still frame the process."},
+        "understandable":{"score":75,"reason":"Named, familiar phases make the method legible. The details within each phase still rely on prompts and agent judgment."},
+        "reuse":{"score":100,"reason":"A deliberately maintained method is repeatedly applied and adapted to different tasks."},
+        "budgets":{"score":25,"reason":"Phase boundaries make manual resource checks convenient, while allocation and enforcement are mostly outside the prompt-defined procedure."},
+        "freedom":{"score":75,"reason":"The method can be carried across models and harnesses. Its execution still depends on how reliably a particular setup follows the prompts."},
+        "verifier":{"score":25,"reason":"Tentative inherited score: tests or build checks may serve as phase gates, while process and human review do most of the work. Mere use of tests does not establish dependence; 0 is also defensible under the current definition."}
+      }
+    },
+    {
+      "id":"programmed-loops-and-graphs","title":"Programmed Loops and Graphs","short":"Author the process and execute its control structure.",
+      "signature":"Encode the coordination explicitly","example":"A purpose-built graph or loop with jobs, conditions, state, and handoffs.",
+      "tradeoff":"Unplanned changes to a running process can require engineering work, even when planned human interventions are well supported.",
+      "ratings":{
+        "humanWorker":{"score":100,"reason":"Human jobs can be explicit parts of the program: request input, wait for work, accept an output, and continue."},
+        "replan":{"score":25,"reason":"Planned intervention is straightforward to encode. Unplanned changes to the structure of a running program often require extra work; this is separate from including a human node."},
+        "understandable":{"score":100,"reason":"Authored roles, dependencies, and possible paths can be inspected ahead of time. This score assumes a legible process, not that every large graph is easy to understand."},
+        "reuse":{"score":100,"reason":"The program is a maintained process that can be run repeatedly with new inputs."},
+        "budgets":{"score":100,"reason":"The process can be engineered around explicit run-level and job-level resource limits. This describes a deliberately budgeted implementation, not automatic support in every framework."},
+        "freedom":{"score":100,"reason":"Different jobs can use different models, tools, or full harnesses through explicit integration."},
+        "verifier":{"score":0,"reason":"A graph can organize research, human judgment, and a prescribed method without a global success oracle. Loops do not have to be optimization searches."}
+      }
+    },
+    {
+      "id":"playbooks","title":"Playbooks + Alinery","short":"Run a reusable process that the human can inspect and steer.",
+      "signature":"Call an audible as the work unfolds","example":"A Playbook for complex engineering: focused jobs, artifacts, parallel work, review, and revision.",
+      "tradeoff":"Requires process design and human attention. These talk scores describe the intended experience, not verified feature parity across released versions.",
+      "ratings":{
+        "humanWorker":{"score":50,"reason":"The process can ask the user and teammates for review, answers, and contributions. 100 is reserved for arbitrary human jobs being as natural to assign as AI jobs."},
+        "replan":{"score":100,"reason":"Inspecting artifacts, adjusting context, following discoveries, and redirecting work are central to the experience."},
+        "understandable":{"score":100,"reason":"Explicit roles, handoffs, and possible paths give the person a mental model of the process. Process visibility does not prove that an output is correct."},
+        "reuse":{"score":100,"reason":"Playbooks are maintained, customized, reapplied, and improved through experience with earlier runs."},
+        "budgets":{"score":100,"reason":"Resource limits across tasks and jobs are part of the intended process design. This is the talk's profile rather than an audit of shipped enforcement features."},
+        "freedom":{"score":100,"reason":"The intended design combines models and harnesses by focused role, creating places for smaller, local, and open models to contribute. Current product support must be checked separately."},
+        "verifier":{"score":0,"reason":"Process, artifacts, independent checks, and human judgment can guide work whose intent evolves. No strong automatic end-condition verifier is required."}
+      }
+    }
+  ],
+  "pendingRevision":{
+    "title":"Skill-guided Coding",
+    "status":"Proposal only; excluded from recommendations until the baseline is revised.",
+    "note":"The source chart's title was changed to Skill-guided Coding while retaining the earlier Plain Harness values. The discussed revision was Human Worker 25, Understandable 50, and Reuse 75, with other values retained. This app preserves the last confirmed Plain Harness scores and makes the pending change explicit.",
+    "scores":{"humanWorker":25,"replan":100,"understandable":50,"reuse":75,"budgets":25,"freedom":75,"verifier":0}
+  }
+}

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Process Radar</title>
+  <meta name="description" content="Describe your task. Explore the process that fits it, using Dustin's seven-dimension talk rubric.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2319252b'/%3E%3Cpath d='M16 5 27 13 23 26 9 26 5 13Z' fill='none' stroke='%2379cda6'/%3E%3Cpath d='M16 5 23 15 16 22 9 26 11 14Z' fill='%2379cda6' fill-opacity='.5' stroke='%2379cda6'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/">Process Radar<span class="brand-dot"></span></a><a href="#reference">The cheat sheet ↗</a></header>
+  <main>
+    <div class="intro"><p class="eyebrow">A field guide to agentic work</p><h1>What does this task call for?</h1><p>Describe the work. Find a starting process, see its shape, and decide what to change.</p></div>
+    <section class="workspace" aria-label="Task and process comparison">
+      <div class="input-panel">
+        <div class="section-top"><span class="eyebrow">01 / The task</span><span class="tag" id="connection">Checking connection…</span></div>
+        <form id="task-form">
+          <label for="task">What are you trying to do?</label>
+          <textarea id="task" minlength="20" maxlength="8000" rows="8" required placeholder="We need to migrate a complex codebase. The tests cover some behavior, but architectural choices need human judgment. I'd like to review decisions as we go, run local models where possible, and reuse the process…"></textarea>
+          <p class="hint">Useful details: uncertainty, checks you trust, human involvement, repeatability, models, and budget.</p>
+          <div class="examples" id="examples" aria-label="Example tasks"></div>
+          <button class="primary" type="submit" id="analyze">Find a starting process <span aria-hidden="true">↗</span></button>
+          <div id="status" role="status" aria-live="polite"></div>
+        </form>
+        <details class="setup"><summary>Connect a model</summary><p>GPT-5.5 is configured in <code>.env</code>. Add your <code>OPENAI_API_KEY</code>, then restart <code>npm start</code>. To use a local model, change <code>LLM_BASE_URL</code> and <code>LLM_MODEL</code>; see the README for compatibility settings.</p><p id="privacy">Task text is sent only when you click the button, to the endpoint you configure. This app does not save it.</p></details>
+        <p class="small">A discussion aid built from the talk's rubric. Scores describe intended use; they are not performance measurements.</p>
+      </div>
+      <div class="chart-panel">
+        <div class="section-top"><span class="eyebrow">02 / The shape</span><button class="text-button" id="download" type="button">Download SVG ↓</button></div>
+        <div class="chart-heading"><h2 id="chart-title">Explore the reference profiles</h2><p id="chart-description">Start with a familiar approach, or describe a task to create your own profile.</p></div>
+        <label class="select-label" for="comparison">Reference profile<select id="comparison"></select></label>
+        <div id="chart"></div>
+        <p class="chart-note">A larger shape isn't a better process. “Needs Strong Verifier” measures dependence on automatic checks.</p>
+      </div>
+    </section>
+    <section id="result" class="result" hidden aria-labelledby="result-title"></section>
+    <section id="reference" class="reference">
+      <div class="reference-heading"><div><p class="eyebrow">03 / The field guide</p><h2>Six ways to organize the work</h2></div><a href="/cheat-sheet.md" download>Download cheat sheet ↓</a></div>
+      <p class="section-description">Use these as starting profiles. A real process may combine several approaches.</p>
+      <div class="profile-grid" id="profiles"></div>
+      <details class="definitions"><summary>The seven dimensions · what 0 and 100 mean</summary><div class="table-scroll"><table><thead><tr><th>Dimension</th><th>0</th><th>100</th></tr></thead><tbody id="dimensions"></tbody></table></div></details>
+      <details class="definitions"><summary>Pending revision: Skill-guided Coding</summary><p id="pending"></p></details>
+    </section>
+  </main>
+  <footer>Process Radar <span>Local demo · Your task, your judgment.</span></footer>
+</body>
+</html>
