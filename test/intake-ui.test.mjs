@@ -5,6 +5,7 @@ import { setImmediate } from 'node:timers/promises';
 import vm from 'node:vm';
 import { countdown } from '../public/countdown.mjs';
 import { revealScores } from '../public/reveal.mjs';
+import { closestProfiles } from '../public/similarity.mjs';
 import { sampleResult } from './fixtures.mjs';
 
 const source = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8'))
@@ -47,7 +48,12 @@ async function ui({ realResult = false } = {}) {
   };
   const context = vm.createContext({
     document, window: { location: { href: 'http://localhost/' }, addEventListener() {}, matchMedia: () => ({ matches: true }) },
-    AbortController, structuredClone, URL, revealScores,
+    AbortController, structuredClone, URL, revealScores, closestProfiles,
+    radar(dimensions, series, title) {
+      const chart = element('svg');
+      chart.radar = structuredClone({ dimensions, series, title });
+      return chart;
+    },
     countdown: (seconds, tick, complete) => countdown(seconds, tick, complete, clock)
   });
   vm.runInContext(source, context);
@@ -89,6 +95,42 @@ async function ui({ realResult = false } = {}) {
     }
   };
 }
+
+test('the recommendation overlays the task with its recommended reference, including exact matches', async context => {
+  const recommended = catalog.approaches.find(approach => approach.id === 'playbooks');
+  for (const profileId of ['goal', 'playbooks']) await context.test(profileId, async () => {
+    const app = await ui();
+    const profileSource = catalog.approaches.find(approach => approach.id === profileId);
+    const data = structuredClone(sampleResult);
+    data.profile = catalog.dimensions.map(({ id }) => ({ id, ...profileSource.ratings[id] }));
+    const nearest = closestProfiles(catalog.dimensions, catalog.approaches, data.profile);
+    assert.equal(nearest[0].approach.id, profileId);
+
+    app.context.renderRecommendation(data);
+
+    const custom = {
+      label: 'Your task’s suggested process',
+      scores: Object.fromEntries(data.profile.map(({ id, score }) => [id, score])),
+      color: '#16834b'
+    };
+    const reference = approach => ({
+      label: approach.title + ' · reference',
+      scores: Object.fromEntries(catalog.dimensions.map(({ id }) => [id, approach.ratings[id].score])),
+      color: '#315ce8', dashed: true
+    });
+    const top = app.$('chart').children[0].radar;
+    assert.deepEqual(top.dimensions, catalog.dimensions);
+    assert.deepEqual(top.series, [custom, reference(recommended)]);
+    assert.equal(app.$('result-title').textContent, recommended.title);
+
+    const comparisons = app.$('similar-charts').children;
+    assert.equal(comparisons.length, 3);
+    comparisons.forEach((card, index) => {
+      const chart = card.querySelectorAll('svg')[0].radar;
+      assert.deepEqual(chart.series, [custom, reference(nearest[index].approach)]);
+    });
+  });
+});
 
 test('the UI opens editable answers and starts scoring exactly once after seven seconds', async () => {
   const app = await ui();

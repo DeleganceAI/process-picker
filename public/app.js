@@ -230,13 +230,14 @@ function renderRecommendation(data) {
   $('reason').textContent = data.reason;
   $('steps').replaceChildren(list('How to get started', data.steps, true));
   const custom = { label: 'Your task’s suggested process', scores: Object.fromEntries(data.profile.map(p => [p.id, p.score])), color: '#16834b' };
-  $('chart').replaceChildren(radar(catalog.dimensions, [custom], 'Your task’s custom process profile'));
+  const comparisonChart = reference => radar(catalog.dimensions, [custom, {
+    label: reference.title + ' · reference', scores: Object.fromEntries(catalog.dimensions.map(d => [d.id, reference.ratings[d.id].score])), color: '#315ce8', dashed: true
+  }], 'Your suggested process compared with ' + reference.title);
+  $('chart').replaceChildren(comparisonChart(approach));
   $('similar-charts').replaceChildren(...closestProfiles(catalog.dimensions, catalog.approaches, data.profile).map(({ approach: reference, gap }) => {
     const card = make('article', undefined, 'similar-card');
     card.append(make('h4', reference.title), make('p', `Average score gap: ${Math.round(gap)} / 100`, 'profile-gap'));
-    card.append(radar(catalog.dimensions, [custom, {
-      label: reference.title + ' · reference', scores: Object.fromEntries(catalog.dimensions.map(d => [d.id, reference.ratings[d.id].score])), color: '#315ce8', dashed: true
-    }], 'Your suggested process compared with ' + reference.title));
+    card.append(comparisonChart(reference));
     return card;
   }));
 
