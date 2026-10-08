@@ -131,6 +131,24 @@ test('continuing accepts unknown defaults and snapshots the selected source and 
   assert.equal(app.calls.filter(call => call.path === '/api/intake').length, 1);
 });
 
+test('all nine compact answers retain their labels, values, and accessible descriptions', async () => {
+  const app = await ui();
+  await app.prepare(task);
+  const fields = app.$('intake-fields').children;
+  assert.equal(fields.length, questions.length);
+  fields.forEach((field, index) => {
+    const [input] = field.querySelectorAll('textarea');
+    const [label] = field.querySelectorAll('label');
+    const descriptions = input['aria-describedby'].split(' ').map(id => field.children.find(child => child.id === id));
+    assert.equal(input.rows, 1);
+    assert.equal(input.value, draft().answers[index].answer);
+    assert.equal(label.htmlFor, input.id);
+    assert.equal(label.textContent, questions[index].label);
+    assert.equal(descriptions[0].textContent, questions[index].question);
+    assert.equal(descriptions[1].textContent, draft().answers[index].evidence || questions[index].hint);
+  });
+});
+
 test('editing answers clears inference evidence and hides stale scores without another intake call', async () => {
   const app = await ui();
   await app.prepare(task);
@@ -142,13 +160,17 @@ test('editing answers clears inference evidence and hides stale scores without a
   assert.equal(answer.status, 'edited');
   assert.equal(answer.evidence, '');
   assert.equal(app.$('result').hidden, true);
-  assert.equal(app.$('intake-fields').children[0].children[0].children[1].textContent, 'Your edit');
+  const field = app.$('intake-fields').children[0];
+  assert.equal(field.querySelectorAll('span')[0].textContent, 'Your edit');
+  assert.equal(field.children.find(child => child.id === 'intake-help-expertise').textContent, questions[0].hint);
   assert.equal(app.$('recommend').textContent, 'See my scores · paused');
   await app.advance(60000);
   assert.equal(app.calls.length, 2);
   await app.recommend();
   assert.equal(app.calls.length, 3);
   assert.equal(app.calls[2].body.intake.answers[0].answer, input.value);
+  assert.equal(app.calls[2].body.intake.answers[0].status, 'edited');
+  assert.equal(app.calls[2].body.intake.answers[0].evidence, '');
 });
 
 test('editing the task invalidates the review and requires new intake before scoring', async () => {

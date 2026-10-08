@@ -319,18 +319,17 @@ function renderIntake(autoAdvance) {
   const fields = intakeQuestions.map(question => {
     const answer = intakeAnswers.find(item => item.id === question.id);
     const field = make('div', undefined, 'intake-field');
-    const heading = make('div', undefined, 'intake-field-heading');
     const label = make('label', question.label); label.htmlFor = `intake-${question.id}`;
+    label.title = question.question;
     const badge = make('span', undefined, 'answer-status');
     const statuses = { stated: 'Stated', inferred: 'Inferred', unknown: 'Unknown', edited: 'Your edit' };
     badge.textContent = statuses[answer.status];
-    heading.append(label, badge);
-    const prompt = make('p', question.question, 'intake-question');
+    const prompt = make('p', question.question, 'sr-only');
     prompt.id = `intake-question-${question.id}`;
     const input = make('textarea'); input.id = `intake-${question.id}`;
-    input.rows = 2; input.maxLength = 600; input.value = answer.answer;
+    input.rows = 1; input.maxLength = 600; input.value = answer.answer;
     input.setAttribute('aria-describedby', `${prompt.id} intake-help-${question.id}`);
-    const help = make('p', answer.evidence || question.hint, 'intake-evidence');
+    const help = make('p', answer.evidence || question.hint, 'sr-only');
     help.id = `intake-help-${question.id}`;
     input.addEventListener('input', () => {
       pauseAdvance(); resultData = null;
@@ -343,7 +342,7 @@ function renderIntake(autoAdvance) {
       $('review-error').textContent = '';
       renderUsage();
     });
-    field.append(heading, prompt, input, help);
+    field.append(label, input, badge, prompt, help);
     return field;
   });
   $('intake-fields').replaceChildren(...fields);
