@@ -1,6 +1,8 @@
 import { buildMessages, DemoError, validateRecommendation } from './model.mjs';
 
 const MAX_BYTES = 512 * 1024;
+// Model catalogs include metadata beyond the two fields used by the picker.
+const MAX_MODEL_LIST_BYTES = 16 * 1024 * 1024;
 const API = 'https://api.openai.com/v1';
 const PLAN_ERRORS = {
   subscription_sharing_user_not_eligible: [403, 'ChatGPT plan usage is unavailable for this account or workspace.'],
@@ -40,8 +42,8 @@ function transportError(error) {
   return new DemoError('Could not complete the connection to ChatGPT. Check your connection and try again.', 502);
 }
 
-async function readLimited(response) {
-  if (!response.body) throw new DemoError('ChatGPT returned an empty response.');
+async function readLimited(response, maxBytes = MAX_BYTES, description = 'response') {
+  if (!response.body) throw new DemoError(`ChatGPT returned an empty ${description}.`);
   const reader = response.body.getReader();
   const chunks = []; let size = 0;
   try {
@@ -49,7 +51,7 @@ async function readLimited(response) {
       const { value, done } = await reader.read();
       if (done) break;
       size += value.length;
-      if (size > MAX_BYTES) throw new DemoError('The ChatGPT response was too large.');
+      if (size > maxBytes) throw new DemoError(`The ChatGPT ${description} was too large.`);
       chunks.push(value);
     }
   } finally {
@@ -74,7 +76,7 @@ export async function listChatGPTModels(accessToken, fetchImpl = fetch) {
     });
     await checkResponse(response);
     let value;
-    try { value = JSON.parse(await readLimited(response)); } catch (error) {
+    try { value = JSON.parse(await readLimited(response, MAX_MODEL_LIST_BYTES, 'model list')); } catch (error) {
       if (error instanceof SyntaxError) throw new DemoError('ChatGPT returned an invalid model list.');
       throw error;
     }

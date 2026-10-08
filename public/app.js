@@ -67,9 +67,12 @@ function renderConnection() {
 }
 
 async function refreshAuth() {
-  authBusy = true; authFailed = false; renderConnection();
+  authBusy = true; authFailed = false; session = null;
+  $('status').className = ''; $('status').textContent = ''; $('usage-error').hidden = true;
+  $('account-options').hidden = true;
   $('model').replaceChildren(make('option', 'Choose a model'));
   $('model').firstChild.value = '';
+  renderConnection();
   try {
     session = await request('/api/auth/session');
     const accounts = session.accounts || [];
@@ -93,6 +96,9 @@ async function refreshAuth() {
     }
     if (session.authError) showError(new Error(session.authError));
   } catch (error) {
+    error.message = session?.signedIn && session.planEnabled ?
+      `You’re signed in, but the available models could not be loaded. ${error.message} Use Retry connection to try again.` :
+      `Could not check your sign-in. ${error.message} Use Retry connection to try again.`;
     authFailed = true; showError(error);
   } finally {
     authBusy = false; renderConnection();

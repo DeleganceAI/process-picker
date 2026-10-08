@@ -36,12 +36,43 @@ test('ChatGPT discovery retains only visible models in server order', async () =
   }), [{ id: 'second', name: 'Second' }, { id: 'first', name: 'First' }]);
 });
 
+test('model discovery accepts a large catalog while returning only picker fields', async () => {
+  let calls = 0;
+  const metadata = 'large model metadata '.repeat(50_000);
+  const models = [
+    { slug: 'first', display_name: 'First', visibility: 'list', metadata },
+    { slug: 'hidden', display_name: 'Hidden', visibility: 'hide', metadata },
+    { slug: 'gpt-5.5', display_name: 'GPT-5.5', visibility: 'list', metadata }
+  ];
+  const wire = JSON.stringify({ models });
+  assert.ok(Buffer.byteLength(wire) > 512 * 1024);
+  const result = await listChatGPTModels(config.accessToken, async url => {
+    calls++;
+    assert.equal(url, 'https://api.openai.com/v1/models');
+    return stream(wire, 64 * 1024);
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(result, [{ id: 'first', name: 'First' }, { id: 'gpt-5.5', name: 'GPT-5.5' }]);
+});
+
+test('model catalog limit remains bounded by bytes and cancels oversized streams', async () => {
+  let cancelled = false, chunks = 0;
+  const chunk = new TextEncoder().encode('é'.repeat(256 * 1024));
+  const response = new Response(new ReadableStream({
+    pull(controller) { chunks++; controller.enqueue(chunk); },
+    cancel() { cancelled = true; }
+  }));
+  await assert.rejects(listChatGPTModels(config.accessToken, async () => response), safeError(/model list was too large/));
+  assert.equal(cancelled, true);
+  assert.ok(chunks <= 34, 'stop reading at the 16 MiB catalog limit');
+});
+
 test('ChatGPT discovery rejects invalid lists and does not leak provider errors', async () => {
   for (const response of [Response.json({ data: [] }), Response.json({ models: [{ visibility: 'list', slug: 5 }] }), new Response('provider-secret')]) {
     await assert.rejects(listChatGPTModels('test-secret', async () => response), safeError(/invalid model list/));
   }
   await assert.rejects(listChatGPTModels('', () => { throw new Error('Must not fetch'); }), /Sign in/);
-  await assert.rejects(listChatGPTModels('test-secret', async () => new Response('x'.repeat(512 * 1024 + 1))), /too large/);
+  await assert.rejects(listChatGPTModels('test-secret', async () => new Response('x'.repeat(512 * 1024 + 1))), /invalid model list/);
 });
 
 test('ChatGPT sends only supported Responses fields with instructions and user input', async () => {

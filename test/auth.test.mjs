@@ -357,7 +357,7 @@ test('HTTP subscription requests enforce the account model list and never fall b
   h.state.inference = async (url, options) => {
     inferenceCalls.push({ url, options });
     assert.equal(options.headers.Authorization, 'Bearer access-secret-client-one');
-    if (url.endsWith('/models')) return Response.json({ models: [{ slug: 'account-model', display_name: 'Account Model', visibility: 'list' }] });
+    if (url.endsWith('/models')) return Response.json({ models: [{ slug: 'account-model', display_name: 'Account Model', visibility: 'list', metadata: 'x'.repeat(1024 * 1024) }] });
     assert.equal(url, 'https://api.openai.com/v1/responses');
     assert.equal(JSON.parse(options.body).model, 'account-model');
     return new Response(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: JSON.stringify(sampleResult) })}\n\ndata: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed' } })}\n\n`);
@@ -369,6 +369,10 @@ test('HTTP subscription requests enforce the account model list and never fall b
   assert.equal(unauthenticated.status, 401);
   assert.equal(inferenceCalls.length, 0);
   const cookie = await httpLogin(base, h);
+  const discovery = await fetch(base + '/api/auth/models', { headers: { Cookie: cookie } });
+  assert.equal(discovery.status, 200);
+  assert.deepEqual(await discovery.json(), { models: [{ id: 'account-model', name: 'Account Model' }] });
+  assert.deepEqual(inferenceCalls.map(call => call.url), ['https://api.openai.com/v1/models']);
   const invalid = await post(base, '/api/recommend', { task: sampleTask, source: 'chatgpt', model: 'owner-model' }, cookie);
   assert.equal(invalid.status, 400);
   assert.deepEqual(inferenceCalls.map(call => call.url), ['https://api.openai.com/v1/models']);
