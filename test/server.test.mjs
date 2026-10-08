@@ -10,7 +10,7 @@ async function start(t, server) {
   t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
   return `http://127.0.0.1:${server.address().port}`;
 }
-const post = (url, task = sampleTask, headers = {}) => fetch(url + '/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify({ task }) });
+const post = (url, task = sampleTask, headers = {}) => fetch(url + '/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify({ task, source: 'endpoint' }) });
 
 test('real HTTP roundtrip through a fake OpenAI-compatible endpoint', async t => {
   let seen;

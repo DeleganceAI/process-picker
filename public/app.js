@@ -7,7 +7,111 @@ const make = (tag, text, className) => {
   if (className) el.className = className;
   return el;
 };
-let catalog, busy = false, configured = false;
+let catalog, config, session, busy = false, authBusy = true, authFailed = false;
+
+async function request(path, body) {
+  const response = await fetch(path, body === undefined ? {} : {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  let data;
+  try { data = await response.json(); } catch { throw new Error('The local server could not be reached. Try again.'); }
+  if (!response.ok) {
+    const error = new Error(data.error || 'The request could not be completed.');
+    error.code = data.code; error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
+function ready() {
+  if (!catalog || busy || authBusy) return false;
+  return $('source').value === 'endpoint' ? config?.configured :
+    session?.signedIn && session.planEnabled && !session.needsWelcome && Boolean($('model').value);
+}
+
+function renderConnection() {
+  const chatgpt = $('source').value === 'chatgpt';
+  const hasPlan = session?.signedIn && session.planEnabled;
+  const locked = busy || authBusy;
+  $('chatgpt-settings').hidden = !chatgpt;
+  $('endpoint-settings').hidden = chatgpt;
+  $('login').hidden = !chatgpt || hasPlan;
+  $('plan-controls').hidden = !chatgpt || !hasPlan;
+  $('retry-auth').hidden = !chatgpt || !authFailed;
+  $('logout').hidden = !session?.signedIn;
+  for (const id of ['source', 'account', 'account-login', 'login', 'logout', 'retry-auth']) $(id).disabled = locked || !catalog;
+  $('model').disabled = locked || !hasPlan || $('model').options.length < 2;
+  $('analyze').disabled = !ready();
+  $('analyze').textContent = busy ? 'Thinking…' : 'Find my approach';
+  $('account-status').textContent = authBusy ? 'Checking sign-in…' : session?.signedIn ?
+    `${session.account?.label || 'Signed in'}${hasPlan ? '' : ' · ChatGPT plan access was not enabled.'}` : 'Sign in to use your ChatGPT plan.';
+  $('connection').textContent = config?.configured ? `Connected to ${config.model}` : 'No API / local model connected yet';
+  $('privacy').textContent = chatgpt ? hasPlan ?
+    'Sent to OpenAI using your ChatGPT plan when you submit. Not saved by this app; provider retention may apply.' :
+    'Sign in to use your ChatGPT plan, or choose an API / local model in Setup. Tasks are not saved by this app.' :
+    config?.configured ? `Sent to ${config.endpoint} when you submit. Uses the configured endpoint’s credentials, not your ChatGPT plan. Not saved by this app; provider retention may apply.` :
+    'Configure an API / local model in Setup before submitting. Tasks are not saved by this app.';
+}
+
+async function refreshAuth() {
+  authBusy = true; authFailed = false; renderConnection();
+  $('model').replaceChildren(make('option', 'Choose a model'));
+  $('model').firstChild.value = '';
+  try {
+    session = await request('/api/auth/session');
+    const accounts = session.accounts || [];
+    $('account').replaceChildren(...accounts.map(account => {
+      const option = make('option', account.label); option.value = account.id; return option;
+    }));
+    const add = make('option', 'Add another account'); add.value = ''; $('account').append(add);
+    $('account').value = session.account?.id || accounts[0]?.id || '';
+    $('account-options').hidden = accounts.length === 0;
+    if (session.signedIn && session.planEnabled) {
+      const { models } = await request('/api/auth/models');
+      for (const model of models) {
+        const option = make('option', model.name); option.value = model.id; $('model').append(option);
+      }
+      if (models.some(model => model.id === 'gpt-5.5')) $('model').value = 'gpt-5.5';
+      if (!models.length) throw new Error('No models are available for this ChatGPT account. Check your plan access or try again.');
+      if (!$('model').value) {
+        $('status').className = '';
+        $('status').textContent = 'GPT-5.5 is not available for this account. Choose an available model to continue.';
+      }
+    }
+    if (session.authError) showError(new Error(session.authError));
+  } catch (error) {
+    authFailed = true; showError(error);
+  } finally {
+    authBusy = false; renderConnection();
+    if (session?.signedIn && session.planEnabled && session.needsWelcome && !$('welcome').open) $('welcome').showModal();
+  }
+}
+
+async function login(accountId = $('account').value) {
+  if (busy || authBusy) return;
+  authBusy = true; renderConnection();
+  try {
+    const { url } = await request('/api/auth/login', {
+      ...(accountId ? { accountId } : {}),
+      ...(session?.signedIn && !session.planEnabled && accountId === session.account?.id ? { enablePlan: true } : {})
+    });
+    const target = new URL(url);
+    if (target.origin !== 'https://auth.openai.com' || target.username || target.password) throw new Error('The sign-in URL was not recognized.');
+    window.location.assign(target.href);
+  } catch (error) {
+    authBusy = false; renderConnection(); showError(error);
+  }
+}
+
+async function dismissWelcome() {
+  $('welcome-dismiss').disabled = true; $('welcome-error').textContent = '';
+  try {
+    await request('/api/auth/welcome', {});
+    session.needsWelcome = false; $('welcome').close(); renderConnection();
+  } catch (error) {
+    $('welcome-error').textContent = error.message;
+  } finally { $('welcome-dismiss').disabled = false; }
+}
 
 function download(name, content, type) {
   const url = URL.createObjectURL(new Blob([content], { type }));
@@ -56,50 +160,70 @@ function showResult(data) {
 
 function showError(error) {
   $('status').className = 'error'; $('status').textContent = error.message;
+  $('usage-error').hidden = $('source').value !== 'chatgpt' || error.code !== 'subscription_sharing_usage_limit_exceeded';
 }
 async function analyze(task) {
   if (busy) throw new Error('A recommendation is already running.');
+  if (!ready()) throw new Error('Connect your model and choose it before asking for a recommendation.');
   if (typeof task !== 'string' || task.trim().length < 20 || task.length > 8000) throw new Error('Describe your task in 20–8,000 characters.');
-  busy = true; $('analyze').disabled = true; $('analyze').textContent = 'Thinking…';
+  const source = $('source').value, model = $('model').value;
+  busy = true; renderConnection(); $('usage-error').hidden = true;
   $('task').value = task; $('task').readOnly = true; $('input-box').setAttribute('aria-busy', 'true');
   $('result').hidden = true;
   $('status').className = ''; $('status').textContent = 'Finding an approach that fits your task…';
   try {
-    const response = await fetch('/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task }) });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'The recommendation could not be generated.');
+    const data = await request('/api/recommend', { task, source, ...(source === 'chatgpt' ? { model } : {}) });
     showResult(data);
     $('status').textContent = 'Your recommendation is ready below.';
     return data;
   } catch (error) {
-    if (!configured) $('setup').open = true;
+    if (error.status === 401 && source === 'chatgpt') {
+      session = null; $('model').value = ''; authFailed = true;
+    }
     showError(error);
     throw error;
   } finally {
-    busy = false; $('analyze').disabled = false; $('analyze').textContent = 'Find my approach';
+    busy = false; renderConnection();
     $('task').readOnly = false; $('input-box').setAttribute('aria-busy', 'false');
   }
 }
 
 async function init() {
-  const [catalogResponse, configResponse] = await Promise.all([fetch('/api/catalog'), fetch('/api/config')]);
-  if (!catalogResponse.ok || !configResponse.ok) throw new Error('Unable to load the app. Refresh to try again.');
-  catalog = await catalogResponse.json();
-  const config = await configResponse.json(); configured = config.configured;
-  $('connection').textContent = configured ? `Connected to ${config.model}` : 'No model connected yet';
-  if (configured) $('privacy').textContent = `Sent to ${config.endpoint} when you submit. Not saved by this app; provider retention may apply.`;
+  $('source').addEventListener('change', () => { $('status').textContent = ''; $('usage-error').hidden = true; renderConnection(); });
+  $('model').addEventListener('change', () => { $('status').textContent = ''; renderConnection(); });
+  $('login').addEventListener('click', () => login());
+  $('account-login').addEventListener('click', () => login());
+  $('retry-auth').addEventListener('click', refreshAuth);
+  $('logout').addEventListener('click', async () => {
+    if (busy || authBusy) return;
+    authBusy = true; renderConnection();
+    try {
+      const { message } = await request('/api/auth/logout', {});
+      session = null;
+      await refreshAuth();
+      $('status').className = ''; $('status').textContent = message || 'Signed out.';
+    } catch (error) { authBusy = false; renderConnection(); showError(error); }
+  });
+  $('welcome-dismiss').addEventListener('click', dismissWelcome);
+  $('welcome').addEventListener('cancel', event => { event.preventDefault(); if (!$('welcome-dismiss').disabled) dismissWelcome(); });
   $('download').addEventListener('click', () => download('process-radar.svg', new XMLSerializer().serializeToString($('chart').firstChild), 'image/svg+xml'));
   $('task-form').addEventListener('submit', event => {
     event.preventDefault();
     if (!busy) analyze($('task').value).catch(showError);
   });
-  $('analyze').disabled = false;
+  [catalog, config] = await Promise.all([request('/api/catalog'), request('/api/config')]);
+  await refreshAuth();
+  const page = new URL(window.location.href);
+  if (page.searchParams.has('signin')) {
+    if (page.searchParams.get('signin') === 'error' && !session?.authError) showError(new Error('Sign-in was not completed. You can try again.'));
+    page.searchParams.delete('signin'); window.history.replaceState(null, '', page.pathname + page.search + page.hash);
+  }
   const context = document.modelContext;
   if (context?.registerTool) {
     const lifecycle = new AbortController();
     Promise.resolve(context.registerTool({
       name: 'recommend_process', title: 'Recommend a process',
-      description: 'Send a task description to the configured LLM endpoint and display a suggested process, radar chart, and rationale. May incur provider charges.',
+      description: 'Send a task description to the model and funding source explicitly selected in the page, then display a suggested process, radar chart, and rationale. Uses ChatGPT plan allowance or the configured endpoint credentials. Requires sign-in/model setup first.',
       inputSchema: { type: 'object', properties: { task: { type: 'string', minLength: 20, maxLength: 8000 } }, required: ['task'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: true },
       execute: async input => analyze(input?.task)

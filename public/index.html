@@ -15,8 +15,26 @@
     <details class="setup" id="setup">
       <summary>Setup</summary>
       <div class="setup-content">
-        <p id="connection">Checking model connection…</p>
-        <p>Set <code>LLM_BASE_URL</code> and <code>LLM_MODEL</code> in <code>.env</code>. For OpenAI, add <code>OPENAI_API_KEY</code>, then restart <code>npm start</code>. Local OpenAI-compatible models work too.</p>
+        <label class="field-label" for="source">Use</label>
+        <select id="source" disabled>
+          <option value="chatgpt">My ChatGPT plan</option>
+          <option value="endpoint">Configured API / local model</option>
+        </select>
+        <div id="chatgpt-settings">
+          <p id="account-status">Checking sign-in…</p>
+          <div id="account-options" hidden>
+            <label class="field-label" for="account">ChatGPT account</label>
+            <select id="account"></select>
+          </div>
+          <button type="button" class="signin" id="account-login" disabled>Continue with ChatGPT</button>
+          <button type="button" class="text-button" id="logout" hidden>Sign out</button>
+          <p class="setup-note">Use eligible requests from your ChatGPT plan. Sign-in tokens stay on this local server. They are cleared when it restarts.</p>
+        </div>
+        <div id="endpoint-settings" hidden>
+          <p id="connection">Checking model connection…</p>
+          <p>Set <code>LLM_BASE_URL</code> and <code>LLM_MODEL</code> in <code>.env</code>. For OpenAI, add <code>OPENAI_API_KEY</code>, then restart <code>npm start</code>. Local OpenAI-compatible models work too.</p>
+          <p class="setup-note">Uses the configured endpoint and its credentials, separately from your ChatGPT plan.</p>
+        </div>
         <a href="/cheat-sheet.md" download>Download the process cheat sheet</a>
       </div>
     </details>
@@ -29,8 +47,19 @@
           <textarea id="task" minlength="20" maxlength="8000" rows="5" required aria-describedby="privacy" placeholder="Describe what you're working on, and anything that matters to you."></textarea>
           <div class="input-actions"><button class="primary" type="submit" id="analyze" disabled>Find my approach</button></div>
         </div>
-        <p class="privacy" id="privacy">Only sent to your configured model when you submit. Not saved by this app.</p>
+        <div class="connection-controls">
+          <button class="signin" type="button" id="login" disabled>Continue with ChatGPT</button>
+          <div id="plan-controls" hidden>
+            <label class="sr-only" for="model">ChatGPT model</label>
+            <select id="model" disabled><option value="">Choose a model</option></select>
+            <span>Using ChatGPT plan</span>
+            <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">Manage usage</a>
+          </div>
+          <button class="text-button" type="button" id="retry-auth" hidden>Retry connection</button>
+        </div>
+        <p class="privacy" id="privacy">Sign in to use your ChatGPT plan, or choose an API / local model in Setup. Tasks are not saved by this app.</p>
         <div id="status" role="status" aria-live="polite"></div>
+        <a id="usage-error" class="usage-action" href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer" hidden>Manage usage</a>
       </form>
     </section>
     <section id="result" class="result" hidden aria-labelledby="result-title">
@@ -53,5 +82,12 @@
       </details>
     </section>
   </main>
+  <dialog id="welcome" aria-labelledby="welcome-title" aria-describedby="welcome-description">
+    <h2 id="welcome-title">You’re using your ChatGPT plan</h2>
+    <p id="welcome-description">Eligible AI requests in Process Radar use your ChatGPT plan or credits balance. You can review and manage this usage in ChatGPT settings.</p>
+    <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">Manage usage</a>
+    <p id="welcome-error" role="status"></p>
+    <button type="button" class="primary" id="welcome-dismiss" autofocus>Got it</button>
+  </dialog>
 </body>
 </html>
