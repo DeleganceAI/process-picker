@@ -2,7 +2,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { DemoError, readConfig, recommend, validateTask } from './model.mjs';
+import { buildMessages, DemoError, readConfig, recommend, validateTask } from './model.mjs';
 import { createAuth, registrationStore } from './auth.mjs';
 import { listChatGPTModels, recommendWithChatGPT } from './chatgpt-model.mjs';
 
@@ -12,6 +12,8 @@ const routes = new Map([
   ['/', ['public/index.html', 'text/html; charset=utf-8']],
   ['/style.css', ['public/style.css', 'text/css; charset=utf-8']],
   ['/app.js', ['public/app.js', 'text/javascript; charset=utf-8']],
+  ['/usage.mjs', ['public/usage.mjs', 'text/javascript; charset=utf-8']],
+  ['/reveal.mjs', ['public/reveal.mjs', 'text/javascript; charset=utf-8']],
   ['/radar.js', ['public/radar.js', 'text/javascript; charset=utf-8']],
   ['/radar-svg.mjs', ['skills/process-radar/scripts/radar-svg.mjs', 'text/javascript; charset=utf-8']],
   ['/cheat-sheet.md', ['docs/cheat-sheet.md', 'text/markdown; charset=utf-8']]
@@ -30,6 +32,7 @@ async function body(req) {
 
 export function createApp(config = readConfig(), fetchImpl = fetch, auth = null) {
   let running = false;
+  const instructionCharacters = buildMessages('Estimate a task before running it.', catalog)[0].content.length;
   return http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store');
@@ -81,7 +84,8 @@ export function createApp(config = readConfig(), fetchImpl = fetch, auth = null)
       if (req.method === 'GET' && url.pathname === '/api/catalog') return json(200, catalog);
       if (req.method === 'GET' && url.pathname === '/api/config') return json(200, {
         configured: config.configured, model: config.model,
-        endpoint: config.endpoint ? new URL(config.endpoint).origin : null
+        endpoint: config.endpoint ? new URL(config.endpoint).origin : null,
+        usage: { instructionCharacters, outputCap: config.maxTokens, tokenField: config.tokenField }
       });
       if (req.method === 'POST' && url.pathname === '/api/recommend') {
         if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] || '')) throw new DemoError('Use Content-Type: application/json.', 415);

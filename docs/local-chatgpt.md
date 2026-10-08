@@ -18,6 +18,10 @@ Use **Setup** to sign out, sign in to a saved registration, add another account,
 
 The page shows **Using ChatGPT plan** and **Manage usage** beside the model picker. Recommendation requests consume the selected account's allowance or permitted credits. Review applicable limits in [ChatGPT usage settings](https://chatgpt.com/settings/usage). Request timeouts and response-size caps do not guarantee a spending limit; the subscription route does not use the API adapter's `LLM_MAX_TOKENS` setting.
 
+Before you submit, a short usage notice names the selected model and estimates input tokens from the actual rubric/instructions plus your task. It is a coarse character-based estimate, not a model tokenizer or a bill: model, language and formatting affect the count. Reply and reasoning tokens are additional and cannot be predicted from the task length. One submission makes one recommendation request, with no automatic inference retries. The ChatGPT plan route has no local output-token cap; the optional endpoint route displays its configured cap separately.
+
+Once the model response has completed and passed validation, the page reveals each of the seven dimension scores, followed by the suggested approach and first steps. This animation uses the same returned result and makes no extra AI calls. **Show all** skips the reveal; a reduced-motion preference shows everything immediately. Unrevealed scores use a dash, so a real zero remains distinct.
+
 ## Local storage and security
 
 - Access and refresh tokens remain in server memory, isolated by browser session. They never enter JavaScript, browser storage, URLs, logs, or Git.

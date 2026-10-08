@@ -1,4 +1,6 @@
 import { radar } from './radar.js';
+import { revealScores } from './reveal.mjs';
+import { usageNotice } from './usage.mjs';
 
 const $ = id => document.getElementById(id);
 const make = (tag, text, className) => {
@@ -7,11 +9,11 @@ const make = (tag, text, className) => {
   if (className) el.className = className;
   return el;
 };
-let catalog, config, session, busy = false, authBusy = true, authFailed = false;
+let catalog, config, session, activeReveal, activeRequest, busy = false, authBusy = true, authFailed = false;
 
-async function request(path, body) {
-  const response = await fetch(path, body === undefined ? {} : {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+async function request(path, body, signal) {
+  const response = await fetch(path, body === undefined ? { signal } : {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal
   });
   let data;
   try { data = await response.json(); } catch { throw new Error('The local server could not be reached. Try again.'); }
@@ -29,6 +31,16 @@ function ready() {
     session?.signedIn && session.planEnabled && !session.needsWelcome && Boolean($('model').value);
 }
 
+function renderUsage() {
+  const source = $('source').value;
+  const model = source === 'endpoint' ? config?.model : $('model').selectedOptions[0]?.value ? $('model').selectedOptions[0].textContent : null;
+  $('usage-notice').hidden = !model;
+  if (!model) return;
+  const notice = usageNotice({ ...config?.usage, task: $('task').value, source, model });
+  $('usage-summary').textContent = notice.summary;
+  $('usage-detail').textContent = notice.detail;
+}
+
 function renderConnection() {
   const chatgpt = $('source').value === 'chatgpt';
   const hasPlan = session?.signedIn && session.planEnabled;
@@ -42,7 +54,7 @@ function renderConnection() {
   for (const id of ['source', 'account', 'account-login', 'login', 'logout', 'retry-auth']) $(id).disabled = locked || !catalog;
   $('model').disabled = locked || !hasPlan || $('model').options.length < 2;
   $('analyze').disabled = !ready();
-  $('analyze').textContent = busy ? 'Thinking…' : 'Find my approach';
+  $('analyze').textContent = busy ? activeReveal ? 'Revealing scores…' : 'Thinking…' : 'Find my approach';
   $('account-status').textContent = authBusy ? 'Checking sign-in…' : session?.signedIn ?
     `${session.account?.label || 'Signed in'}${hasPlan ? '' : ' · ChatGPT plan access was not enabled.'}` : 'Sign in to use your ChatGPT plan.';
   $('connection').textContent = config?.configured ? `Connected to ${config.model}` : 'No API / local model connected yet';
@@ -51,6 +63,7 @@ function renderConnection() {
     'Sign in to use your ChatGPT plan, or choose an API / local model in Setup. Tasks are not saved by this app.' :
     config?.configured ? `Sent to ${config.endpoint} when you submit. Uses the configured endpoint’s credentials, not your ChatGPT plan. Not saved by this app; provider retention may apply.` :
     'Configure an API / local model in Setup before submitting. Tasks are not saved by this app.';
+  renderUsage();
 }
 
 async function refreshAuth() {
@@ -123,7 +136,7 @@ function list(title, items, ordered = false) {
   const wrap = make('div'); wrap.append(make('h3', title));
   const ul = make(ordered ? 'ol' : 'ul'); items.forEach(item => ul.append(make('li', item))); wrap.append(ul); return wrap;
 }
-function showResult(data) {
+function renderRecommendation(data) {
   const approach = catalog.approaches.find(a => a.id === data.recommendedApproach);
   $('result-title').textContent = approach.title;
   $('reason').textContent = data.reason;
@@ -152,10 +165,55 @@ function showResult(data) {
   const actions = make('div', undefined, 'result-actions'), json = make('button', 'Save recommendation JSON', 'text-button');
   json.type = 'button'; json.addEventListener('click', () => download('process-recommendation.json', JSON.stringify(data, null, 2), 'application/json'));
   actions.append(json); details.append(actions);
+  $('chart-wait').hidden = true;
+  for (const id of ['chart', 'download', 'recommendation', 'reasoning']) $(id).hidden = false;
+}
+
+async function showResult(data, signal) {
+  if (signal.aborted) return false;
+  const rows = catalog.dimensions.map(dimension => {
+    const rating = data.profile.find(item => item.id === dimension.id);
+    const row = make('div', undefined, 'score-row');
+    const name = make('dt', dimension.label);
+    const value = make('dd', undefined, 'score-value');
+    const number = make('span', '—');
+    value.append(number, make('span', ' / 100', 'score-max'));
+    const track = make('div', undefined, 'score-track'); track.setAttribute('aria-hidden', 'true');
+    const bar = make('div', undefined, 'score-bar'); track.append(bar);
+    row.append(name, value, track);
+    return { row, number, bar, rating };
+  });
+  $('scores').replaceChildren(...rows.map(item => item.row));
+  $('result').classList.remove('is-complete');
   $('result').hidden = false;
+  $('chart-wait').hidden = false;
+  $('reveal-count').textContent = `0 of ${rows.length} dimensions`;
+  for (const id of ['chart', 'download', 'recommendation', 'reasoning']) $(id).hidden = true;
+  $('chart').replaceChildren();
+  $('result-title').textContent = '';
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  $('show-all').hidden = reducedMotion;
   document.querySelector('main').classList.add('has-result');
-  $('result-title').focus({ preventScroll: true });
+  $('status').textContent = 'Your scores are ready. Revealing each dimension, then your recommendation.';
+  $('profile-title').focus({ preventScroll: true });
   $('result').scrollIntoView({ block: 'start' });
+  const reveal = revealScores(rows.length, index => {
+    const { row, number, bar, rating } = rows[index];
+    number.textContent = String(rating.score);
+    bar.style.width = `${rating.score}%`;
+    row.classList.add('is-revealed');
+    $('reveal-count').textContent = `${index + 1} of ${rows.length} dimensions`;
+  }, { signal, reducedMotion });
+  activeReveal = reveal; renderConnection();
+  const completed = await reveal.finished;
+  if (activeReveal === reveal) activeReveal = null;
+  if (!completed || signal.aborted) return false;
+  const skipped = document.activeElement === $('show-all');
+  $('show-all').hidden = true;
+  renderRecommendation(data);
+  $('result').classList.add('is-complete');
+  if (skipped) $('result-title').focus({ preventScroll: true });
+  return true;
 }
 
 function showError(error) {
@@ -167,28 +225,37 @@ async function analyze(task) {
   if (!ready()) throw new Error('Connect your model and choose it before asking for a recommendation.');
   if (typeof task !== 'string' || task.trim().length < 20 || task.length > 8000) throw new Error('Describe your task in 20–8,000 characters.');
   const source = $('source').value, model = $('model').value;
+  const controller = new AbortController(); activeRequest = controller;
+  activeReveal?.cancel(); activeReveal = null;
   busy = true; renderConnection(); $('usage-error').hidden = true;
-  $('task').value = task; $('task').readOnly = true; $('input-box').setAttribute('aria-busy', 'true');
+  $('task').value = task; renderUsage(); $('task').readOnly = true; $('input-box').setAttribute('aria-busy', 'true');
   $('result').hidden = true;
   $('status').className = ''; $('status').textContent = 'Finding an approach that fits your task…';
   try {
-    const data = await request('/api/recommend', { task, source, ...(source === 'chatgpt' ? { model } : {}) });
-    showResult(data);
-    $('status').textContent = 'Your recommendation is ready below.';
+    const data = await request('/api/recommend', { task, source, ...(source === 'chatgpt' ? { model } : {}) }, controller.signal);
+    if (!await showResult(data, controller.signal)) return;
+    $('status').textContent = `All seven scores are revealed. Recommended approach: ${$('result-title').textContent}.`;
     return data;
   } catch (error) {
+    if (controller.signal.aborted) return;
     if (error.status === 401 && source === 'chatgpt') {
       session = null; $('model').value = ''; authFailed = true;
     }
     showError(error);
     throw error;
   } finally {
+    if (activeRequest === controller) activeRequest = null;
     busy = false; renderConnection();
     $('task').readOnly = false; $('input-box').setAttribute('aria-busy', 'false');
   }
 }
 
 async function init() {
+  $('task').addEventListener('input', renderUsage);
+  $('show-all').addEventListener('click', () => activeReveal?.showAll());
+  window.addEventListener('pagehide', () => {
+    activeRequest?.abort(); activeReveal?.cancel();
+  });
   $('source').addEventListener('change', () => { $('status').textContent = ''; $('usage-error').hidden = true; renderConnection(); });
   $('model').addEventListener('change', () => { $('status').textContent = ''; renderConnection(); });
   $('login').addEventListener('click', () => login());
