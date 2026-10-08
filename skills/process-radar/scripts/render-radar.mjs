@@ -5,6 +5,7 @@ import { renderRadarSvg, escapeXml } from './radar-svg.mjs';
 
 export function chartSeries(input, catalog) {
   if (!input || !Array.isArray(input.profile) || input.profile.length !== 7) throw new Error('Provide all seven profile dimensions. Unknown observations cannot be plotted as zero.');
+  if (input.profileKind !== undefined && input.profileKind !== 'task-requirements') throw new Error('Unknown profile kind.');
   const ids = catalog.dimensions.map(d => d.id), seen = new Set(), scores = {};
   for (const p of input.profile) {
     if (!p || !ids.includes(p.id) || seen.has(p.id) || ![0,25,50,75,100].includes(p.score)) throw new Error('Expected seven unique dimension IDs and scores in increments of 25.');
@@ -16,7 +17,7 @@ export function chartSeries(input, catalog) {
     if (!reference) throw new Error('Unknown reference approach.');
     series.push({ label:reference.title+' · reference', color:'#315ce8', dashed:true, scores:Object.fromEntries(ids.map(id => [id,reference.ratings[id].score])) });
   }
-  series.push({ label:'Suggested process for your task', color:'#16834b', scores });
+  series.push({ label:input.profileKind === 'task-requirements' ? 'Task requirements · assessed first' : 'Suggested process for your task', color:'#16834b', scores });
   return series;
 }
 
@@ -34,10 +35,19 @@ export async function main(args) {
   try { input = JSON.parse(await readFile(options['--input'],'utf8')); }
   catch { throw new Error('Could not read a valid recommendation JSON file.'); }
   const catalog = JSON.parse(await readFile(new URL('../references/catalog.json',import.meta.url),'utf8'));
-  const title = input.summary ?? 'Suggested process';
+  const requirements = input.profileKind === 'task-requirements';
+  const title = input.summary ?? (requirements ? 'Task requirements' : 'Suggested process');
   if (typeof title !== 'string' || title.length > 500) throw new Error('Summary must be text under 500 characters.');
-  const svg = renderRadarSvg(catalog.dimensions,chartSeries(input,catalog),title);
-  const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>${escapeXml(title)}</title><style>body{font:16px system-ui;background:#f5f6f2;color:#283346;max-width:760px;margin:32px auto;padding:16px}h1{font-size:24px}svg{width:100%;height:auto}p{line-height:1.5}</style><h1>${escapeXml(title)}</h1>${svg}<p>Intended-use profile. Bigger is not better. Needs Strong Verifier measures dependence on automatic checks.</p></html>`;
+  let dimensions = catalog.dimensions;
+  if (requirements) {
+    const rubric = JSON.parse(await readFile(new URL('../references/task-rubric.json',import.meta.url),'utf8'));
+    dimensions = input.recommendedApproach === undefined ? rubric.dimensions : catalog.dimensions.map(d => d.id === 'verifier' ? { ...d, label:'Automatic Verifier: Available / Needed', lines:['Automatic Verifier','Available / Needed'] } : d);
+  }
+  const svg = renderRadarSvg(dimensions,chartSeries(input,catalog),title);
+  const note = requirements
+    ? 'Green: task support required and automatic verification available. Dashed blue, if shown: reference process support and dependence on automatic verification. Surplus support is not a benefit by itself; verification dependence above availability is a mismatch signal. Scores are ordinal; bigger is not better.'
+    : 'Intended-use profile. Bigger is not better. Needs Strong Verifier measures dependence on automatic checks.';
+  const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>${escapeXml(title)}</title><style>body{font:16px system-ui;background:#f5f6f2;color:#283346;max-width:760px;margin:32px auto;padding:16px}h1{font-size:24px}svg{width:100%;height:auto}p{line-height:1.5}</style><h1>${escapeXml(title)}</h1>${svg}<p>${note}</p></html>`;
   await writeFile(options['--out'],/\.html$/i.test(options['--out'])?html:svg,{flag:'wx',mode:0o600});
   console.log(path.resolve(options['--out']));
 }

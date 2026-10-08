@@ -39,7 +39,13 @@ where they fit. Recommend a process and show me a radar chart.
 
 In Claude Code, replace `$process-radar` with `/process-radar`.
 
-The response recommends a starting process, explains its tradeoff and an alternative, and provides a short handoff prompt. It does not create a task or begin implementation unless asked. You can also say “no chart.” Skills may be discovered automatically when a request matches their description, but this package does not install a hook to intercept every new task.
+The skill first estimates answers to [nine context questions](../skills/process-radar/references/task-questions.md): expertise, audience, consequences, checks, uncertainty, time and effort, human oversight, constraints, and reuse. It uses context already available, labels stated facts versus inferred answers and confidence, and continues without asking the user for more information or confirmation.
+
+Next it reads the process-neutral [task rubric](../skills/process-radar/references/task-rubric.json) and derives all seven requirement scores from those answers, naming the inputs behind each score. Only then does it load the process profiles and recommend an approach using those scores. Both assessment tables appear even with “no chart”; “rubric only” includes the nine answers and dimension scores, then stops. Answers and scores remain unchanged during comparison unless new task evidence warrants a disclosed revision. Uncertainty is carried forward rather than blocking progress.
+
+The first six scores describe support the task requires. The seventh describes **automatic verification available**, compared against a process's **dependence on automatic verification**. Higher support is not automatically better, and a process that depends on stronger checks than the task offers needs an adaptation or a different choice. These are ordinal comparisons, not product capability guarantees or nearest-shape rankings.
+
+The response explains the decisive score matches and shortfalls, a tradeoff, and an alternative; a handoff prompt is optional. It does not create a task or begin implementation unless asked. Skills may be discovered automatically when a request matches their description, but this package does not install a hook to intercept every new task.
 
 ## Review previous work
 
@@ -49,7 +55,7 @@ where my process was a poor fit. Cite the evidence, include choices
 that worked well, and suggest one habit to change. Do not modify anything.
 ```
 
-Or request a bounded selection, such as “the last five conversations about this repo,” when your harness exposes a history-list/read tool. If the host cannot access those conversations, provide exports. The skill never assumes full access to every past session.
+Or request a bounded selection, such as “the last five conversations about this repo,” when your harness exposes a history-list/read tool. Exports can supply unavailable history, but are not required before a preliminary assessment from the context already present. The skill never assumes full access to every past session or treats missing transcripts as evidence. It estimates the nine answers and scores each distinct task from what was known at the time, then compares the intended and actual process against those requirements. Findings distinguish process choice, assistant execution, and tool limitations.
 
 For an explicit local file selection, the helper can extract message text before review:
 
@@ -65,7 +71,7 @@ This is a text extractor, not an automated judge. The host LLM reads the evidenc
 
 ## Optional charts
 
-The helper supports the demo's recommendation JSON, or the minimal profile in [chart.md](../skills/process-radar/references/chart.md):
+For the skill, use `profileKind: "task-requirements"` and copy the already assessed scores into the format in [chart.md](../skills/process-radar/references/chart.md). The green shape shows task requirements; an optional dashed blue overlay shows the selected process's reference profile. Verification is explicitly labeled as available checks versus process dependence. The helper also supports the demo's older recommendation JSON without `profileKind`, preserving its suggested-process semantics:
 
 ```sh
 node skills/process-radar/scripts/render-radar.mjs \
@@ -77,6 +83,6 @@ Use `.svg` for a slide-friendly image. HTML includes the chart with no external 
 
 ## Maintain
 
-Edit `data/catalog.json`, then run `npm run docs`. That updates the speaker cheat sheet and the self-contained skill's rubric snapshot. The web demo and skill use the same SVG renderer. Run `npm test` before distributing the folder.
+Edit `skills/process-radar/references/task-rubric.json` to maintain task-side scoring anchors. Edit `data/catalog.json`, then run `npm run docs`, to update the speaker cheat sheet and the skill's process-profile snapshot. The web demo retains its existing recommendation flow; this rubric-first sequence applies to the portable skill. Both use the same SVG renderer. Run `npm test` before distributing the folder.
 
 The package has been checked with the skill validator, synthetic transcript tests, standalone chart rendering, and an independent model-based forward test. No real user history was read in creating it. Native invocation in each target harness still needs a local installation and smoke test.

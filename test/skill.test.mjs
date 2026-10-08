@@ -23,6 +23,40 @@ test('chart uses baseline and suggested scores, preserving zero and axis order',
   assert.match(svg,/stroke-dasharray/);
   assert.doesNotMatch(svg,/NaN|undefined|Infinity/);
 });
+test('task requirements stay unchanged when adding a process reference', async () => {
+  const rubric = JSON.parse(await readFile(new URL('../skills/process-radar/references/task-rubric.json',import.meta.url),'utf8'));
+  assert.deepEqual(rubric.dimensions.map(d=>d.id),catalog.dimensions.map(d=>d.id));
+  const input = { profileKind:'task-requirements', profile:structuredClone(sampleResult.profile) };
+  input.profile.find(d=>d.id==='verifier').score = 50;
+  const before = structuredClone(input);
+  const solo = chartSeries(input,catalog);
+  const overlay = chartSeries({...input,recommendedApproach:'goal'},catalog);
+  assert.deepEqual(input,before);
+  assert.equal(solo[0].label,'Task requirements · assessed first');
+  assert.deepEqual(overlay[1],solo[0]);
+  assert.equal(overlay[0].scores.verifier,100);
+  assert.equal(overlay[1].scores.verifier,50);
+  assert.throws(()=>chartSeries({...input,profileKind:'invented'},catalog));
+  input.profile[0].score = 'unknown';
+  assert.throws(()=>chartSeries(input,catalog));
+});
+test('requirements charts distinguish available verification from process dependence', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(),'process-radar-requirements-'));
+  const input = path.join(dir,'input.json'), solo = path.join(dir,'solo.svg'), overlay = path.join(dir,'overlay.html');
+  const data = { profileKind:'task-requirements', profile:sampleResult.profile };
+  await writeFile(input,JSON.stringify(data));
+  await main(['--input',input,'--out',solo]);
+  const svg = await readFile(solo,'utf8');
+  assert.match(svg,/Human Work Required/);
+  assert.match(svg,/Automatic Verifier Available/);
+  assert.doesNotMatch(svg,/Suggested process for your task/);
+  await writeFile(input,JSON.stringify({...data,recommendedApproach:'goal'}));
+  await main(['--input',input,'--out',overlay]);
+  const html = await readFile(overlay,'utf8');
+  assert.match(html,/Available \/ Needed/);
+  assert.match(html,/verification dependence above availability/);
+  assert.doesNotMatch(html,/<script|<link|<iframe/);
+});
 test('renderer escapes text and rejects incomplete or invalid profiles', () => {
   const series = chartSeries(sampleResult,catalog);
   series[1].label = '<script>bad()</script>';

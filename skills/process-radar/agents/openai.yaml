@@ -1,4 +1,4 @@
 interface:
   display_name: "Process Radar"
-  short_description: "Choose a process or review past agent work"
-  default_prompt: "Use $process-radar to recommend a process before I start this task, with a radar chart if useful."
+  short_description: "Estimate task context, score needs, recommend a process"
+  default_prompt: "Use $process-radar to estimate the nine task-context answers from what you know, score the dimensions from those answers, then recommend a process without asking me for more input."

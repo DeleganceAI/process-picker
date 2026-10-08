@@ -1,0 +1,154 @@
+{
+  "version": "task-requirements-2026-10-08",
+  "purpose": "After estimating and recording all nine task-context answers, derive the task's requirement scores and available verification from those answers before consulting any process profiles. Do not recommend an approach during scoring.",
+  "scale": "Use 0, 25, 50, 75, or 100. The anchors below define 0, 50, and 100; use 25 and 75 for intermediate positions. Scores describe the degree of support required, except verifier, which describes available automatic outcome verification. These are ordinal judgments, not percentages or importance weights.",
+  "evidence": "For every dimension, name the relevant prior context answers and explain how they inform the score. Distinguish stated facts from inferences and preserve confidence. Use a provisional score where defensible, or unknown where even an estimate lacks a basis, and proceed without asking for more user input. Record confirmed hard constraints separately; inferred preferences, reviewers, or budgets are not confirmed constraints or resources.",
+  "dimensions": [
+    {
+      "id": "humanWorker",
+      "label": "Human Work Required",
+      "lines": [
+        "Human Work",
+        "Required"
+      ],
+      "question": "How much support does this task require for assigning actual work to people?",
+      "anchors": {
+        "0": "No assigned human work is needed beyond oversight or steering.",
+        "50": "Bounded human contributions are needed at identifiable points, such as supplying domain analysis or conducting an interview.",
+        "100": "Human contributions recur throughout the task and need explicit assignments, deliverables, and handoffs alongside agent work."
+      },
+      "distinction": "Approving, inspecting, and redirecting are supervision; score them under replan. A human producing part of the work is a worker.",
+      "informedBy": [
+        "Expertise",
+        "Human oversight",
+        "Audience",
+        "Consequences"
+      ],
+      "scoringGuidance": "Infer whether actual human contributions are needed and who could supply them. Expertise gaps or meaningful consequences may suggest a contribution, but explain the specific work; oversight alone does not count as assigned human work, and a guessed reviewer is not confirmed."
+    },
+    {
+      "id": "replan",
+      "label": "Human Replanning Needed",
+      "lines": [
+        "Human Replanning",
+        "Needed"
+      ],
+      "question": "How much must the person be able to redirect work as understanding changes?",
+      "anchors": {
+        "0": "Direction and scope are stable; ongoing human replanning is unnecessary.",
+        "50": "Human decisions at planned checkpoints should be sufficient.",
+        "100": "Goals, architecture, or interpretation evolve through frequent inspection and potentially unplanned changes to the work."
+      },
+      "distinction": "Score the need for steering, not how much free time the person has. Record available human attention separately.",
+      "informedBy": [
+        "Uncertainty",
+        "Human oversight",
+        "Expertise"
+      ],
+      "scoringGuidance": "Use uncertainty to estimate how much redirection is needed. Use expertise and oversight to assess whether that steering is feasible. Limited reviewer availability does not reduce the need for replanning; retain and disclose the conflict."
+    },
+    {
+      "id": "understandable",
+      "label": "Process Visibility Needed",
+      "lines": [
+        "Process Visibility",
+        "Needed"
+      ],
+      "question": "How explicitly must the person understand roles, possible paths, decisions, and handoffs?",
+      "anchors": {
+        "0": "Inspecting the result is sufficient; an explicit account of the process is unnecessary.",
+        "50": "Named phases, responsibilities, and key decisions need to be visible.",
+        "100": "The task requires an inspectable process with explicit roles, dependencies, alternative paths, and handoffs."
+      },
+      "distinction": "This concerns understanding how work proceeds, not the general desire for correct results or clear prose.",
+      "informedBy": [
+        "Expertise",
+        "Audience",
+        "Consequences",
+        "Human oversight"
+      ],
+      "scoringGuidance": "Estimate what process visibility would let these users and reviewers judge the work. Less expertise may call for clearer phases and explanations, not a more elaborate process. Reliance and consequences inform the need for inspectable decisions without automatically setting a high score."
+    },
+    {
+      "id": "reuse",
+      "label": "Method Reuse Needed",
+      "lines": [
+        "Method Reuse",
+        "Needed"
+      ],
+      "question": "How much does the task require maintaining and reapplying the overall method?",
+      "anchors": {
+        "0": "This is a one-off task with no expected reuse of its overall method.",
+        "50": "Similar tasks will recur and reusing a lightweight procedure would be useful.",
+        "100": "A maintained method must support repeated runs, shared use, and deliberate improvement over time."
+      },
+      "distinction": "Reusing a prompt, library, or output alone does not establish a need to maintain the task-level method.",
+      "informedBy": [
+        "Reuse"
+      ],
+      "scoringGuidance": "Use the expected repetition of the overall method. Repeated use of the resulting product is not the same as repeated execution of the process that builds it."
+    },
+    {
+      "id": "budgets",
+      "label": "Budget Enforcement Needed",
+      "lines": [
+        "Budget Enforcement",
+        "Needed"
+      ],
+      "question": "What level of resource-limit enforcement does the task require?",
+      "anchors": {
+        "0": "No special allocation or enforcement is needed beyond ordinary session controls.",
+        "50": "Explicit run or phase limits and a defined stop/fallback rule are needed.",
+        "100": "Automatic allocation and enforcement of resource limits across the run and its jobs are essential."
+      },
+      "distinction": "Wanting cheap work does not imply sophisticated enforcement. Record actual time, token, or money limits separately.",
+      "informedBy": [
+        "Time and effort",
+        "Constraints"
+      ],
+      "scoringGuidance": "Translate stated limits and tentative effort expectations into the necessary degree of enforcement. Urgency or a wish to save money alone does not require automatic allocation; do not invent a numerical cap or deadline."
+    },
+    {
+      "id": "freedom",
+      "label": "Model/Harness Flexibility Needed",
+      "lines": [
+        "Model/Harness",
+        "Flexibility Needed"
+      ],
+      "question": "How much choice or combination of models and harnesses does the task require?",
+      "anchors": {
+        "0": "One fixed, suitable model and harness is sufficient.",
+        "50": "Choosing or switching models or harnesses between phases is useful.",
+        "100": "Different roles must use different models or harnesses, coordinated within the same process."
+      },
+      "distinction": "A requirement to use one specific local model is a hard compatibility constraint, not automatically a high flexibility score. Do not infer capability from model size or brand.",
+      "informedBy": [
+        "Constraints"
+      ],
+      "scoringGuidance": "Distinguish required compatibility with one model or harness from the need to switch or combine them. Carry inferred preferences as assumptions, not mandatory restrictions."
+    },
+    {
+      "id": "verifier",
+      "label": "Automatic Verifier Available",
+      "lines": [
+        "Automatic Verifier",
+        "Available"
+      ],
+      "question": "How fully do reliable automatic checks establish the intended outcome and when work is complete?",
+      "anchors": {
+        "0": "No reliable automatic outcome check exists; meaningful completion depends on human judgment.",
+        "50": "Reliable checks cover important parts, but material questions about success still require judgment.",
+        "100": "Reliable automatic checks cover the delegated outcome and its stopping condition."
+      },
+      "distinction": "This measures available evidence, not the desire for verification or the stakes. Tests that catch regressions may leave architecture, relevance, or taste unresolved. Do not assume an available verifier is complete without task evidence.",
+      "informedBy": [
+        "Checks",
+        "Uncertainty",
+        "Expertise",
+        "Audience",
+        "Consequences"
+      ],
+      "scoringGuidance": "Start with the checks actually available and what outcome they cover. Separate existing automatic checks, planned checks, and human judgment. Expertise helps assess judgment but does not make it automatic; uncertainty, audience, and consequences can expose coverage gaps, not create verification strength."
+    }
+  ]
+}

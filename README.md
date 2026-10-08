@@ -6,7 +6,7 @@ The numbers are Dustin's intended-use characterizations. They are a discussion a
 
 ## Use it as a skill
 
-The [portable Process Radar skill](skills/process-radar/SKILL.md) recommends a process before starting a task, optionally draws a radar, and can review explicitly selected past conversations for process mismatches. It runs inside Claude Code, Codex, or another compatible harness using that harness's own model. No separate API key or web server is needed.
+The [portable Process Radar skill](skills/process-radar/SKILL.md) estimates nine task-context answers from available context, derives dimension scores from those answers, then uses the scores to recommend a process. It does not require extra user input before scoring. It optionally charts the assessment and can review explicitly selected past conversations for process mismatches. It runs inside Claude Code, Codex, or another compatible harness using that harness's own model. No separate API key or web server is needed.
 
 See [installation and examples](docs/skill.md). Conversation review is opt-in, scoped, and read-only; installing the skill does not start scanning history.
 
