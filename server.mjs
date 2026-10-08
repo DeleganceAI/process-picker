@@ -11,6 +11,7 @@ const routes = new Map([
   ['/style.css', ['public/style.css', 'text/css; charset=utf-8']],
   ['/app.js', ['public/app.js', 'text/javascript; charset=utf-8']],
   ['/radar.js', ['public/radar.js', 'text/javascript; charset=utf-8']],
+  ['/radar-svg.mjs', ['skills/process-radar/scripts/radar-svg.mjs', 'text/javascript; charset=utf-8']],
   ['/cheat-sheet.md', ['docs/cheat-sheet.md', 'text/markdown; charset=utf-8']]
 ]);
 

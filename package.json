@@ -7,6 +7,6 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server.mjs",
     "test": "node --test test/*.test.mjs",
-    "docs": "node scripts/cheat-sheet.mjs"
+    "docs": "node scripts/cheat-sheet.mjs && node scripts/sync-skill.mjs"
   }
 }

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Process Radar"
+  short_description: "Choose a process or review past agent work"
+  default_prompt: "Use $process-radar to recommend a process before I start this task, with a radar chart if useful."

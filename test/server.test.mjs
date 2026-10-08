@@ -30,7 +30,7 @@ test('real HTTP roundtrip through a fake OpenAI-compatible endpoint', async t =>
 });
 test('serves only public files, dimensions, and generated cheat sheet', async t => {
   const url = await start(t, createApp(readConfig({})));
-  for (const path of ['/', '/style.css', '/app.js', '/radar.js', '/api/catalog', '/cheat-sheet.md']) assert.equal((await fetch(url + path)).status, 200, path);
+  for (const path of ['/', '/style.css', '/app.js', '/radar.js', '/radar-svg.mjs', '/api/catalog', '/cheat-sheet.md']) assert.equal((await fetch(url + path)).status, 200, path);
   for (const path of ['/.env', '/.git/config', '/server.mjs', '/model.mjs', '/data/catalog.json']) assert.equal((await fetch(url + path)).status, 404, path);
   assert.equal((await post(url)).status, 503);
 });

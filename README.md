@@ -4,6 +4,12 @@ A local demo for choosing a way to organize agentic work. Describe a task, get a
 
 The numbers are Dustin's intended-use characterizations. They are a discussion aid, not benchmarks or a current product capability audit. A larger radar is not a better process.
 
+## Use it as a skill
+
+The [portable Process Radar skill](skills/process-radar/SKILL.md) recommends a process before starting a task, optionally draws a radar, and can review explicitly selected past conversations for process mismatches. It runs inside Claude Code, Codex, or another compatible harness using that harness's own model. No separate API key or web server is needed.
+
+See [installation and examples](docs/skill.md). Conversation review is opt-in, scoped, and read-only; installing the skill does not start scanning history.
+
 ## Run
 
 Requires Node.js 22 or later. There are no package dependencies or build step.
@@ -56,7 +62,8 @@ The LLM chooses a contextual starting point. There is no total-score, polygon-ar
 - `data/catalog.json`: one source for labels, definitions, baseline scores, and rationales.
 - `docs/cheat-sheet.md`: generated speaker notes with all 42 score rationales.
 - `model.mjs`: LLM prompt, endpoint adapter, and response validation.
-- `public/radar.js`: SVG chart renderer, shared by comparisons and downloads.
+- `skills/process-radar/scripts/radar-svg.mjs`: SVG renderer shared by the web demo and portable skill.
+- `skills/process-radar/`: self-contained installable skill, chart helper, and history extractor.
 
 ```sh
 npm run docs
