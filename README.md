@@ -1,5 +1,7 @@
 # Process Radar
 
+**[Try the demo →](https://process-picker-xsicd.ondigitalocean.app/)** — Describe your task and find an AI process that fits. No setup required.
+
 A local demo for choosing a way to organize agentic work. Describe a task, get an LLM's suggested process, and compare its seven-dimension radar with the talk's six reference profiles. The speaker cheat sheet explains every reference score.
 
 The numbers are Dustin's intended-use characterizations. They are a discussion aid, not benchmarks or a current product capability audit. A larger radar is not a better process.
