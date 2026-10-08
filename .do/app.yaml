@@ -1,0 +1,48 @@
+name: process-picker
+region: sfo
+services:
+  - name: web
+    github:
+      repo: DeleganceAI/process-picker
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    dockerfile_path: Dockerfile
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    http_port: 8080
+    routes:
+      - path: /
+    health_check:
+      http_path: /healthz
+    envs:
+      - key: HOSTED
+        scope: RUN_TIME
+        value: "true"
+      - key: PUBLIC_ORIGIN
+        scope: RUN_TIME
+        value: ${APP_URL}
+      - key: LLM_BASE_URL
+        scope: RUN_TIME
+        value: https://api.openai.com/v1
+      - key: LLM_MODEL
+        scope: RUN_TIME
+        value: gpt-6-luna
+      - key: LLM_TOKEN_FIELD
+        scope: RUN_TIME
+        value: max_completion_tokens
+      - key: LLM_MAX_TOKENS
+        scope: RUN_TIME
+        value: "8192"
+      - key: LLM_REASONING_EFFORT
+        scope: RUN_TIME
+        value: low
+      - key: DEMO_HOURLY_CALLS
+        scope: RUN_TIME
+        value: "60"
+      - key: DEMO_DAILY_CALLS
+        scope: RUN_TIME
+        value: "200"
+      - key: DEMO_CONCURRENCY
+        scope: RUN_TIME
+        value: "2"

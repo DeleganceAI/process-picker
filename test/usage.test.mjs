@@ -64,7 +64,8 @@ test('public config supplies only safe estimate metadata from the actual prompt 
   const url = `http://127.0.0.1:${server.address().port}`;
   const response = await fetch(`${url}/api/config`);
   const metadata = await response.json();
-  assert.deepEqual(Object.keys(metadata).sort(), ['configured', 'endpoint', 'model', 'usage']);
+  assert.deepEqual(Object.keys(metadata).sort(), ['configured', 'endpoint', 'hosted', 'model', 'usage']);
+  assert.equal(metadata.hosted, false);
   assert.deepEqual(metadata.usage, {
     instructionCharacters: buildMessages('A valid task to estimate.', catalog)[0].content.length,
     intakeInstructionCharacters: buildIntakeMessages('A valid task to estimate.')[0].content.length,

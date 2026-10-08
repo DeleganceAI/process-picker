@@ -43,8 +43,8 @@ The optional `.env` API/local-model settings continue to apply only to the expli
 
 Automated tests use synthetic identities, a fake OAuth service and fake inference responses. They exercise validation, isolation, refresh, failure handling and the full local HTTP route. They do not establish that your real ChatGPT account is eligible. Complete an actual sign-in and submit a task to verify that final step.
 
-## Future hosting
+## Hosting
 
-This implementation is deliberately loopback-only. OpenAI requires access approval for remotely hosted apps; do not deploy the local dynamic registration flow publicly. App Platform setup, hosted client provisioning, HTTPS cookies and deployment are outside this change.
+The ChatGPT integration is deliberately loopback-only. OpenAI requires access approval for remotely hosted apps; do not deploy the local dynamic registration flow publicly. The separate [hosted API-funded mode](hosting.md) disables ChatGPT sign-in and uses the owner's API project instead. Local sign-in and its saved account data remain on your machine.
 
 Official references: [local registration](https://developers.openai.com/siwc/token-sharing-open-source/sign-in), [models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference), [accounts and sessions](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions), [hosted usage requirements](https://developers.openai.com/cookbook/articles/sign-in-with-chatgpt#usage-policy-and-terms).

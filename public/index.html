@@ -12,7 +12,7 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/">Process Radar</a>
-    <details class="setup" id="setup">
+    <details class="setup" id="setup" hidden>
       <summary>Setup</summary>
       <div class="setup-content">
         <label class="field-label" for="source">Use</label>
@@ -48,7 +48,8 @@
           <div class="input-actions"><button class="primary" type="submit" id="analyze" disabled>Find the optimal AI process</button></div>
         </div>
         <div class="connection-controls">
-          <button class="signin" type="button" id="login" disabled>Continue with ChatGPT</button>
+          <button class="signin" type="button" id="login" disabled hidden>Continue with ChatGPT</button>
+          <span id="hosted-funding" hidden></span>
           <div id="plan-controls" hidden>
             <label class="sr-only" for="model">ChatGPT model</label>
             <select id="model" disabled><option value="">Choose a model</option></select>
@@ -61,7 +62,7 @@
           <p id="usage-summary"></p>
           <details><summary>About this estimate</summary><p id="usage-detail"></p></details>
         </div>
-        <p class="privacy" id="privacy">Sign in to use your ChatGPT plan, or choose an API / local model in Setup. Your draft stays in this tab during sign-in.</p>
+        <p class="privacy" id="privacy">Checking model connection…</p>
         <div id="status" role="status" aria-live="polite"></div>
         <a id="usage-error" class="usage-action" href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer" hidden>Manage usage</a>
       </form>
@@ -74,7 +75,7 @@
       <form id="intake-form">
         <div id="intake-fields" class="intake-fields"></div>
         <div class="intake-actions">
-          <div><p>Continuing starts the scoring call and uses your model allowance.</p><p id="review-usage" hidden></p><p id="review-error" class="review-error" role="status"></p></div>
+          <div><p id="review-allowance">Continuing starts the scoring call.</p><p id="review-usage" hidden></p><p id="review-error" class="review-error" role="status"></p></div>
           <div class="advance-controls"><button class="text-button" type="button" id="pause-review">Pause</button><button class="primary" type="submit" id="recommend" disabled>See my scores</button></div>
         </div>
       </form>

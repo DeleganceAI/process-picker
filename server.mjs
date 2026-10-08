@@ -6,6 +6,7 @@ import { buildMessages, DemoError, inferIntake, readConfig, recommend, validateT
 import { buildIntakeMessages, INTAKE_QUESTIONS, validateIntake } from './intake.mjs';
 import { createAuth, registrationStore } from './auth.mjs';
 import { inferIntakeWithChatGPT, listChatGPTModels, recommendWithChatGPT } from './chatgpt-model.mjs';
+import { createCallLimiter, readHostingConfig } from './hosting.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 export const catalog = JSON.parse(await readFile(path.join(root, 'data/catalog.json'), 'utf8'));
@@ -33,8 +34,9 @@ async function body(req) {
   catch { throw new DemoError('Expected a JSON request body.', 400); }
 }
 
-export function createApp(config = readConfig(), fetchImpl = fetch, auth = null) {
+export function createApp(config = readConfig(), fetchImpl = fetch, auth = null, hosting = readHostingConfig()) {
   let running = false;
+  const claimCall = hosting.enabled ? createCallLimiter(hosting) : null;
   const instructionCharacters = buildMessages('Estimate a task before running it.', catalog)[0].content.length;
   const intakeInstructionCharacters = buildIntakeMessages('Estimate a task before running it.')[0].content.length;
   return http.createServer(async (req, res) => {
@@ -47,15 +49,19 @@ export function createApp(config = readConfig(), fetchImpl = fetch, auth = null)
       res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data));
     };
     try {
-      const allowedHosts = [`127.0.0.1:${req.socket.localPort}`, `localhost:${req.socket.localPort}`];
-      if (!allowedHosts.includes(req.headers.host)) throw new DemoError('This demo accepts local requests only.', 403);
-      const origin = `http://${req.headers.host}`;
+      // Platform probes use an internal Host. This route reveals no configuration or readiness secrets.
+      if (hosting.enabled && req.method === 'GET' && req.url === '/healthz') return json(200, { ok: true });
+      const allowedHosts = hosting.enabled ? [hosting.host] : [`127.0.0.1:${req.socket.localPort}`, `localhost:${req.socket.localPort}`];
+      if (!allowedHosts.includes(req.headers.host)) throw new DemoError(hosting.enabled ? 'Use the configured demo address.' : 'This demo accepts local requests only.', 403);
+      const origin = hosting.enabled ? hosting.origin : `http://${req.headers.host}`;
       const url = new URL(req.url, origin);
       const callback = req.method === 'GET' && url.pathname === '/auth/callback';
+      if (hosting.enabled && (callback || url.pathname.startsWith('/api/auth/'))) return json(404, { error: 'ChatGPT sign-in is available only in the local app.' });
       // OAuth redirects retain cross-site metadata when they land on the static home page.
       const pageNavigation = req.method === 'GET' && url.pathname === '/' &&
         req.headers['sec-fetch-mode'] === 'navigate' && req.headers['sec-fetch-dest'] === 'document';
       if (!callback && !pageNavigation && ((req.headers.origin && req.headers.origin !== origin) || req.headers['sec-fetch-site'] === 'cross-site')) throw new DemoError('Cross-origin requests are not allowed.', 403);
+      if (hosting.enabled && req.method === 'POST' && req.headers.origin !== origin) throw new DemoError('Use the demo page to submit a request.', 403);
       if (req.method === 'GET' && url.pathname === '/' && url.hostname === 'localhost') {
         res.writeHead(302, { Location: `http://127.0.0.1:${req.socket.localPort}/${url.search}` }); return res.end();
       }
@@ -90,21 +96,24 @@ export function createApp(config = readConfig(), fetchImpl = fetch, auth = null)
       if (req.method === 'GET' && url.pathname === '/api/catalog') return json(200, catalog);
       if (req.method === 'GET' && url.pathname === '/api/intake/questions') return json(200, { questions: INTAKE_QUESTIONS });
       if (req.method === 'GET' && url.pathname === '/api/config') return json(200, {
-        configured: config.configured, model: config.model,
+        hosted: hosting.enabled, configured: config.configured, model: config.model,
         endpoint: config.endpoint ? new URL(config.endpoint).origin : null,
         usage: { instructionCharacters, intakeInstructionCharacters, outputCap: config.maxTokens, tokenField: config.tokenField }
       });
       if (req.method === 'POST' && ['/api/intake', '/api/recommend'].includes(url.pathname)) {
         if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] || '')) throw new DemoError('Use Content-Type: application/json.', 415);
-        if (running) throw new DemoError('A request is already running. Please wait.', 429);
+        if (!hosting.enabled && running) throw new DemoError('A request is already running. Please wait.', 429);
         const input = await body(req);
         const task = validateTask(input?.task);
         const intakeRequest = url.pathname === '/api/intake';
         const intake = intakeRequest ? null : validateIntake(input?.intake, { allowEdited: true });
         const source = input.source;
         if (!['chatgpt', 'endpoint'].includes(source)) throw new DemoError('Choose ChatGPT or your configured endpoint.', 400);
+        if (hosting.enabled && source !== 'endpoint') throw new DemoError('This demo uses its funded API connection.', 400);
+        if (hosting.enabled && !config.configured) throw new DemoError('The demo is awaiting its API connection. Please check back shortly.', 503);
         // Two requests may arrive while their bodies are being read.
-        if (running) throw new DemoError('A request is already running. Please wait.', 429);
+        if (!hosting.enabled && running) throw new DemoError('A request is already running. Please wait.', 429);
+        const release = claimCall?.();
         running = true;
         try {
           if (source === 'chatgpt') {
@@ -123,7 +132,7 @@ export function createApp(config = readConfig(), fetchImpl = fetch, auth = null)
           }
           return json(200, intakeRequest ? await inferIntake(task, config, fetchImpl) : await recommend(task, catalog, config, fetchImpl, intake));
         }
-        finally { running = false; }
+        finally { running = false; release?.(); }
       }
       const route = routes.get(url.pathname);
       if (!route || req.method !== 'GET') return json(404, { error: 'Not found.' });
@@ -141,9 +150,10 @@ export function createApp(config = readConfig(), fetchImpl = fetch, auth = null)
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || 4317);
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('PORT must be an integer from 1024 to 65535.');
-  const store = await registrationStore(path.join(root, '.local-auth', 'registrations.json'));
-  const server = createApp(readConfig(), fetch, createAuth({ store }));
+  const hosting = readHostingConfig();
+  const auth = hosting.enabled ? null : createAuth({ store: await registrationStore(path.join(root, '.local-auth', 'registrations.json')) });
+  const server = createApp(readConfig(), fetch, auth, hosting);
   server.requestTimeout = 30000;
   server.on('error', error => { console.error(`Cannot start Process Radar: ${error.code || 'server error'}`); process.exitCode = 1; });
-  server.listen(port, '127.0.0.1', () => console.log(`Process Radar: http://127.0.0.1:${port}`));
+  server.listen(port, hosting.enabled ? '0.0.0.0' : '127.0.0.1', () => console.log(`Process Radar: ${hosting.enabled ? hosting.origin : `http://127.0.0.1:${port}`}`));
 }

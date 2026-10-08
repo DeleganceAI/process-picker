@@ -85,7 +85,7 @@ async function request(path, body, signal) {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal
   });
   let data;
-  try { data = await response.json(); } catch { throw new Error('The local server could not be reached. Try again.'); }
+  try { data = await response.json(); } catch { throw new Error('The server could not be reached. Try again.'); }
   if (!response.ok) {
     const error = new Error(data.error || 'The request could not be completed.');
     error.code = data.code; error.status = response.status;
@@ -94,14 +94,16 @@ async function request(path, body, signal) {
   return data;
 }
 
+function modelSource() { return config?.hosted ? 'endpoint' : $('source').value; }
+
 function ready() {
   if (!catalog || !intakeQuestions.length || busy || authBusy) return false;
-  return $('source').value === 'endpoint' ? config?.configured :
+  return modelSource() === 'endpoint' ? config?.configured :
     session?.signedIn && session.planEnabled && !session.needsWelcome && Boolean($('model').value);
 }
 
 function renderUsage() {
-  const source = $('source').value;
+  const source = modelSource();
   const model = source === 'endpoint' ? config?.model : $('model').selectedOptions[0]?.value ? $('model').selectedOptions[0].textContent : null;
   $('usage-notice').hidden = !model;
   $('review-usage').hidden = !model;
@@ -116,17 +118,22 @@ function renderUsage() {
 }
 
 function renderConnection() {
-  const chatgpt = $('source').value === 'chatgpt';
+  const hosted = Boolean(config?.hosted);
+  if (hosted) $('source').value = 'endpoint';
+  const chatgpt = modelSource() === 'chatgpt';
   const hasPlan = session?.signedIn && session.planEnabled;
   const locked = busy || authBusy;
+  $('setup').hidden = hosted;
+  $('hosted-funding').hidden = !hosted;
+  $('hosted-funding').textContent = 'Demo funded by Alinery';
   $('chatgpt-settings').hidden = !chatgpt;
-  $('endpoint-settings').hidden = chatgpt;
+  $('endpoint-settings').hidden = hosted || chatgpt;
   $('login').hidden = !chatgpt || hasPlan;
   $('plan-controls').hidden = !chatgpt || !hasPlan;
   $('retry-auth').hidden = !chatgpt || !authFailed;
-  $('logout').hidden = !session?.signedIn;
-  for (const id of ['source', 'account', 'account-login', 'login', 'logout', 'retry-auth']) $(id).disabled = locked || !catalog;
-  $('model').disabled = locked || !hasPlan || $('model').options.length < 2;
+  $('logout').hidden = hosted || !session?.signedIn;
+  for (const id of ['source', 'account', 'account-login', 'login', 'logout', 'retry-auth']) $(id).disabled = hosted || locked || !catalog;
+  $('model').disabled = hosted || locked || !hasPlan || $('model').options.length < 2;
   $('analyze').disabled = !ready();
   $('analyze').textContent = busy ? 'Reading your task…' : intakeAnswers ? 'Review my task' : 'Find the optimal AI process';
   $('recommend').disabled = !ready() || !intakeAnswers;
@@ -138,7 +145,10 @@ function renderConnection() {
   $('account-status').textContent = authBusy ? 'Checking sign-in…' : session?.signedIn ?
     `${session.account?.label || 'Signed in'}${hasPlan ? '' : ' · ChatGPT plan access was not enabled.'}` : 'Sign in to use your ChatGPT plan.';
   $('connection').textContent = config?.configured ? `Connected to ${config.model}` : 'No API / local model connected yet';
-  $('privacy').textContent = chatgpt ? hasPlan ?
+  $('review-allowance').textContent = hosted ? 'Continuing starts the scoring call and uses the demo’s allowance.' : 'Continuing starts the scoring call and uses your model allowance.';
+  $('privacy').textContent = hosted ? config.configured ?
+    'Sent to OpenAI when you submit. Alinery pays for this demo; your ChatGPT allowance is not used. Tasks are not saved on this server; provider retention may apply.' :
+    'The demo is awaiting its API configuration. The site operator needs to finish setup before you can submit a task.' : chatgpt ? hasPlan ?
     'Sent to OpenAI using your ChatGPT plan when you submit. Not saved on this server; provider retention may apply.' :
     'Sign in to use your ChatGPT plan, or choose an API / local model in Setup. Your draft stays in this tab during sign-in.' :
     config?.configured ? `Sent to ${config.endpoint} when you submit. Uses the configured endpoint’s credentials, not your ChatGPT plan. Not saved on this server; provider retention may apply.` :
@@ -147,6 +157,7 @@ function renderConnection() {
 }
 
 async function refreshAuth() {
+  if (config?.hosted) { authBusy = false; renderConnection(); return; }
   authBusy = true; authFailed = false; session = null;
   $('status').className = ''; $('status').textContent = ''; $('usage-error').hidden = true;
   $('review-error').textContent = '';
@@ -188,7 +199,7 @@ async function refreshAuth() {
 }
 
 async function login(accountId = $('account').value) {
-  if (busy || authBusy) return;
+  if (config?.hosted || busy || authBusy) return;
   authBusy = true; renderConnection();
   try {
     const { url } = await request('/api/auth/login', {
@@ -205,6 +216,7 @@ async function login(accountId = $('account').value) {
 }
 
 async function dismissWelcome() {
+  if (config?.hosted) return;
   $('welcome-dismiss').disabled = true; $('welcome-error').textContent = '';
   try {
     await request('/api/auth/welcome', {});
@@ -321,7 +333,7 @@ function showError(error) {
   pauseAdvance();
   $('status').className = 'error'; $('status').textContent = error.message;
   $('review-error').textContent = intakeAnswers ? error.message : '';
-  $('usage-error').hidden = $('source').value !== 'chatgpt' || error.code !== 'subscription_sharing_usage_limit_exceeded';
+  $('usage-error').hidden = modelSource() !== 'chatgpt' || error.code !== 'subscription_sharing_usage_limit_exceeded';
 }
 function invalidateIntake() {
   if (intakeTask && $('task').value !== intakeTask) {
@@ -390,14 +402,14 @@ function renderIntake(autoAdvance) {
 
 async function runStage(stage, task, autoAdvance = true) {
   if (busy) throw new Error('A request is already running.');
-  if (!ready()) throw new Error('Connect your model and choose it before asking for a recommendation.');
+  if (!ready()) throw new Error(config?.hosted ? 'The demo is not ready yet. Please try again later.' : 'Connect your model and choose it before asking for a recommendation.');
   if (typeof task !== 'string' || task.trim().length < 20 || task.length > 8000) throw new Error('Describe your task in 20–8,000 characters.');
   if (stage === 'recommend' && (!intakeAnswers || task !== intakeTask)) throw new Error('Check your task before asking for a recommendation.');
   stopAdvance(); resultData = null;
   $('task').value = task;
   if (stage === 'intake') invalidateIntake();
   else intakeAnswers.forEach(answer => restoreEmptyAnswer(answer.id));
-  const source = $('source').value, model = $('model').value;
+  const source = modelSource(), model = $('model').value;
   const body = {
     task, source, ...(source === 'chatgpt' ? { model } : {}),
     ...(stage === 'recommend' ? { intake: { answers: intakeAnswers.map(answer => ({ ...answer })) } } : {})
@@ -473,7 +485,7 @@ async function init() {
   $('account-login').addEventListener('click', () => login());
   $('retry-auth').addEventListener('click', refreshAuth);
   $('logout').addEventListener('click', async () => {
-    if (busy || authBusy) return;
+    if (config?.hosted || busy || authBusy) return;
     authBusy = true; renderConnection();
     try {
       const { message } = await request('/api/auth/logout', {});
@@ -497,7 +509,7 @@ async function init() {
   catalog = loadedCatalog; config = loadedConfig; intakeQuestions = intake.questions;
   await refreshAuth();
   const page = new URL(window.location.href);
-  if (page.searchParams.has('signin')) {
+  if (!config.hosted && page.searchParams.has('signin')) {
     if (page.searchParams.get('signin') === 'error' && !session?.authError) showError(new Error('Sign-in was not completed. You can try again.'));
     page.searchParams.delete('signin'); window.history.replaceState(null, '', page.pathname + page.search + page.hash);
   }
@@ -506,7 +518,9 @@ async function init() {
     const lifecycle = new AbortController();
     Promise.resolve(context.registerTool({
       name: 'prepare_process', title: 'Prepare a process recommendation',
-      description: 'Draft editable answers about a task using the selected model and funding source. Opens a paused review; the user must continue or resume the countdown to score. This tool never starts scoring automatically. Uses ChatGPT plan allowance or configured endpoint credentials. Requires sign-in/model setup first.',
+      description: config.hosted ?
+        'Draft editable answers about a task using this Alinery-funded demo. Opens a paused review; the user must continue or resume the countdown to score. This tool never starts scoring automatically. Uses the demo’s allowance, not the user’s ChatGPT allowance.' :
+        'Draft editable answers about a task using the selected model and funding source. Opens a paused review; the user must continue or resume the countdown to score. This tool never starts scoring automatically. Uses ChatGPT plan allowance or configured endpoint credentials. Requires sign-in/model setup first.',
       inputSchema: { type: 'object', properties: { task: { type: 'string', minLength: 20, maxLength: 8000 } }, required: ['task'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: true },
       execute: async input => prepareTask(input?.task, { autoAdvance: false })
