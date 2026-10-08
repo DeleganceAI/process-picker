@@ -9,6 +9,7 @@ import { createAuth, registrationStore, verifyIdentity } from '../auth.mjs';
 import { createApp } from '../server.mjs';
 import { readConfig } from '../model.mjs';
 import { sampleResult, sampleTask } from './fixtures.mjs';
+import { httpRequest } from './http-request.mjs';
 
 const issuer = 'https://auth.openai.com';
 const planScope = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
@@ -317,19 +318,32 @@ async function httpLogin(base, h) {
   h.state.nonce = authorize.searchParams.get('nonce');
   const callback = new URL(base + '/auth/callback');
   callback.search = new URLSearchParams({ state: authorize.searchParams.get('state'), client_id: 'client-one', code: 'test-code' });
-  const signedIn = await fetch(callback, { headers: { Cookie: cookie, 'Sec-Fetch-Site': 'cross-site' }, redirect: 'manual' });
+  const navigation = { 'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document' };
+  const signedIn = await httpRequest(callback, { headers: { Cookie: cookie, ...navigation } });
   assert.equal(signedIn.status, 303);
-  assert.equal(signedIn.headers.get('location'), '/?signin=success');
-  return signedIn.headers.get('set-cookie').split(';')[0];
+  assert.equal(signedIn.headers.location, '/?signin=success');
+  const signedInCookie = signedIn.headers['set-cookie'][0].split(';')[0];
+  // A browser keeps the cross-site classification across the callback's redirect.
+  const landing = await httpRequest(new URL(signedIn.headers.location, base), {
+    headers: { Cookie: signedInCookie, ...navigation }
+  });
+  assert.equal(landing.status, 200);
+  assert.match(landing.headers['content-type'], /text\/html/);
+  return signedInCookie;
 }
 
-test('HTTP auth requires same-origin JSON, permits only the bound cross-site callback, and hides secrets', async t => {
+test('HTTP auth requires same-origin JSON, permits the callback return navigation, and hides secrets', async t => {
   const h = fixture(), base = await start(t, h);
   for (const headers of [{ Origin: '' }, { Origin: 'https://evil.invalid' }, { 'Content-Type': 'text/plain' }, { 'Sec-Fetch-Site': 'cross-site' }]) {
     assert.equal((await post(base, '/api/auth/login', {}, '', headers)).status, 403);
   }
   const denied = await fetch(base + '/auth/callback?state=forged&code=forged&client_id=client-one', { headers: { 'Sec-Fetch-Site': 'cross-site' }, redirect: 'manual' });
   assert.equal(denied.headers.get('location'), '/?signin=error');
+  const errorPage = await httpRequest(new URL(denied.headers.get('location'), base), {
+    headers: { 'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document' }
+  });
+  assert.equal(errorPage.status, 200);
+  assert.match(errorPage.headers['content-type'], /text\/html/);
   assert.equal(h.state.calls.length, 0);
   const cookie = await httpLogin(base, h);
   const session = await fetch(base + '/api/auth/session', { headers: { Cookie: cookie } }).then(r => r.text());

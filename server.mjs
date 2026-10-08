@@ -48,8 +48,10 @@ export function createApp(config = readConfig(), fetchImpl = fetch, auth = null)
       const origin = `http://${req.headers.host}`;
       const url = new URL(req.url, origin);
       const callback = req.method === 'GET' && url.pathname === '/auth/callback';
-      // Only the OAuth callback accepts cross-site navigation; its state is browser-bound and one-use.
-      if (!callback && ((req.headers.origin && req.headers.origin !== origin) || req.headers['sec-fetch-site'] === 'cross-site')) throw new DemoError('Cross-origin requests are not allowed.', 403);
+      // OAuth redirects retain cross-site metadata when they land on the static home page.
+      const pageNavigation = req.method === 'GET' && url.pathname === '/' &&
+        req.headers['sec-fetch-mode'] === 'navigate' && req.headers['sec-fetch-dest'] === 'document';
+      if (!callback && !pageNavigation && ((req.headers.origin && req.headers.origin !== origin) || req.headers['sec-fetch-site'] === 'cross-site')) throw new DemoError('Cross-origin requests are not allowed.', 403);
       if (req.method === 'GET' && url.pathname === '/' && url.hostname === 'localhost') {
         res.writeHead(302, { Location: `http://127.0.0.1:${req.socket.localPort}/${url.search}` }); return res.end();
       }

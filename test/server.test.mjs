@@ -4,6 +4,7 @@ import http from 'node:http';
 import { createApp } from '../server.mjs';
 import { readConfig } from '../model.mjs';
 import { sampleResult, sampleTask } from './fixtures.mjs';
+import { httpRequest } from './http-request.mjs';
 
 async function start(t, server) {
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
@@ -47,6 +48,40 @@ test('rejects cross-origin, rebinding, malformed, and oversized requests', async
   assert.equal((await fetch(url + '/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: 'broken' })).status, 400);
   assert.equal((await post(url, 'x'.repeat(8001))).status, 400);
   assert.equal((await post(url, 'x'.repeat(66000))).status, 413);
+});
+test('cross-site navigation opens only the static home page, including sign-in returns', async t => {
+  const url = await start(t, createApp(readConfig({})));
+  const navigation = { 'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document' };
+  for (const origin of [undefined, 'null', 'https://auth.openai.com', 'https://other.invalid']) {
+    const headers = { ...navigation, ...(origin ? { Origin: origin } : {}) };
+    for (const path of ['/', '/?signin=success', '/?signin=error']) {
+      const response = await httpRequest(url + path, { headers });
+      assert.equal(response.status, 200);
+      assert.match(response.headers['content-type'], /text\/html/);
+      assert.equal(response.headers['access-control-allow-origin'], undefined);
+      assert.match(response.headers['content-security-policy'], /frame-ancestors 'none'/);
+      assert.equal(response.headers['set-cookie'], undefined);
+    }
+    for (const path of ['/api/config', '/api/catalog', '/api/auth/session', '/api/auth/models', '/app.js']) {
+      assert.equal((await httpRequest(url + path, { headers })).status, 403, path);
+    }
+    for (const path of ['/', '/api/recommend', '/api/auth/login', '/api/auth/logout', '/api/auth/welcome']) {
+      assert.equal((await httpRequest(url + path, { method: 'POST', headers })).status, 403, path);
+    }
+  }
+  for (const headers of [
+    { 'Sec-Fetch-Site': 'cross-site' },
+    { ...navigation, 'Sec-Fetch-Mode': 'cors' },
+    { ...navigation, 'Sec-Fetch-Mode': 'no-cors' },
+    { ...navigation, 'Sec-Fetch-Dest': 'iframe' },
+    { ...navigation, 'Sec-Fetch-Dest': 'empty' },
+    { Origin: 'https://other.invalid' }
+  ]) assert.equal((await httpRequest(url, { headers })).status, 403);
+  const canonical = await httpRequest(url + '/?signin=success', { headers: { ...navigation, Host: `localhost:${new URL(url).port}` } });
+  assert.equal(canonical.status, 302);
+  assert.equal(canonical.headers.location, url + '/?signin=success');
+  assert.equal((await httpRequest(canonical.headers.location, { headers: navigation })).status, 200);
+  assert.equal((await httpRequest(url, { headers: { ...navigation, Host: 'evil.invalid' } })).status, 403);
 });
 test('one request at a time prevents accidental parallel provider calls', async t => {
   let release, entered;
