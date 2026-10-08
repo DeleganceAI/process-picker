@@ -1,4 +1,5 @@
 import { buildMessages, DemoError, validateRecommendation } from './model.mjs';
+import { buildIntakeMessages, validateIntake } from './intake.mjs';
 
 const MAX_BYTES = 512 * 1024;
 // Model catalogs include metadata beyond the two fields used by the picker.
@@ -100,14 +101,14 @@ async function readResponseStream(response) {
     try { event = JSON.parse(raw); } catch { throw new DemoError('ChatGPT returned an invalid event stream.'); }
     const type = event?.type || name;
     if (type === 'response.failed' || type === 'error' || type === 'response.error') throw providerError(null, event.response || event, response.headers.get('x-request-id'));
-    if (type === 'response.incomplete') throw new DemoError('ChatGPT did not complete the recommendation. Try again with a smaller task.');
+    if (type === 'response.incomplete') throw new DemoError('ChatGPT did not complete the response. Try again with a smaller task.');
     if (type === 'response.refusal.delta' || type === 'response.refusal.done') throw new DemoError('The model declined this request. Try a different task description.');
     if (type === 'response.output_text.delta') {
       if (typeof event.delta !== 'string') throw new DemoError('ChatGPT returned an invalid text event.');
       text += event.delta;
     }
     if (type === 'response.completed') {
-      if (event.response?.status && event.response.status !== 'completed') throw new DemoError('ChatGPT did not complete the recommendation.');
+      if (event.response?.status && event.response.status !== 'completed') throw new DemoError('ChatGPT did not complete the response.');
       const output = event.response?.output;
       if (Array.isArray(output)) {
         const parts = output.flatMap(item => item?.type === 'message' && Array.isArray(item.content) ? item.content : []);
@@ -144,7 +145,7 @@ async function readResponseStream(response) {
       pending += decoder.decode(value, { stream: true });
       consumeLines(false);
     }
-    if (!completed) throw new DemoError('The ChatGPT stream ended before the recommendation was complete. Try again.');
+    if (!completed) throw new DemoError('The ChatGPT stream ended before the response was complete. Try again.');
     return text;
   } finally {
     await reader.cancel().catch(() => {});
@@ -152,8 +153,7 @@ async function readResponseStream(response) {
   }
 }
 
-export async function recommendWithChatGPT(task, catalog, { accessToken, model, timeout = 120000 }, fetchImpl = fetch) {
-  const messages = buildMessages(task, catalog);
+async function requestJSON(messages, { accessToken, model, timeout = 120000 }, fetchImpl) {
   if (typeof model !== 'string' || !model.trim() || model.length > 200) throw new DemoError('Choose a model available to your ChatGPT account.', 400);
   let text;
   try {
@@ -167,6 +167,14 @@ export async function recommendWithChatGPT(task, catalog, { accessToken, model, 
   } catch (error) { throw transportError(error); }
   const clean = text.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, '$1');
   let value;
-  try { value = JSON.parse(clean); } catch { throw new DemoError('ChatGPT returned text instead of a valid JSON recommendation. Try again.'); }
-  return validateRecommendation(value, catalog);
+  try { value = JSON.parse(clean); } catch { throw new DemoError('ChatGPT returned text instead of a valid JSON response. Try again.'); }
+  return value;
+}
+
+export async function recommendWithChatGPT(task, catalog, options, fetchImpl = fetch, intake) {
+  return validateRecommendation(await requestJSON(buildMessages(task, catalog, intake), options, fetchImpl), catalog);
+}
+
+export async function inferIntakeWithChatGPT(task, options, fetchImpl = fetch) {
+  return validateIntake(await requestJSON(buildIntakeMessages(task), options, fetchImpl), { modelResponse: true });
 }

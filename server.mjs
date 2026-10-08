@@ -2,9 +2,10 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { buildMessages, DemoError, readConfig, recommend, validateTask } from './model.mjs';
+import { buildMessages, DemoError, inferIntake, readConfig, recommend, validateTask } from './model.mjs';
+import { buildIntakeMessages, INTAKE_QUESTIONS, validateIntake } from './intake.mjs';
 import { createAuth, registrationStore } from './auth.mjs';
-import { listChatGPTModels, recommendWithChatGPT } from './chatgpt-model.mjs';
+import { inferIntakeWithChatGPT, listChatGPTModels, recommendWithChatGPT } from './chatgpt-model.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 export const catalog = JSON.parse(await readFile(path.join(root, 'data/catalog.json'), 'utf8'));
@@ -33,6 +34,7 @@ async function body(req) {
 export function createApp(config = readConfig(), fetchImpl = fetch, auth = null) {
   let running = false;
   const instructionCharacters = buildMessages('Estimate a task before running it.', catalog)[0].content.length;
+  const intakeInstructionCharacters = buildIntakeMessages('Estimate a task before running it.')[0].content.length;
   return http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store');
@@ -60,7 +62,7 @@ export function createApp(config = readConfig(), fetchImpl = fetch, auth = null)
         if (url.hostname !== '127.0.0.1') throw new DemoError('Open the demo at 127.0.0.1 to sign in.', 400);
         if (req.method === 'POST') {
           if (req.headers.origin !== origin || !/^application\/json(?:;|$)/i.test(req.headers['content-type'] || '')) throw new DemoError('Sign-in actions require a same-origin JSON request.', 403);
-          if (running) throw new DemoError('Wait for the recommendation to finish before changing accounts.', 409);
+          if (running) throw new DemoError('Wait for the current request to finish before changing accounts.', 409);
         }
         const session = auth.session(req, res, !callback);
         if (callback) {
@@ -84,20 +86,23 @@ export function createApp(config = readConfig(), fetchImpl = fetch, auth = null)
         return json(404, { error: 'Not found.' });
       }
       if (req.method === 'GET' && url.pathname === '/api/catalog') return json(200, catalog);
+      if (req.method === 'GET' && url.pathname === '/api/intake/questions') return json(200, { questions: INTAKE_QUESTIONS });
       if (req.method === 'GET' && url.pathname === '/api/config') return json(200, {
         configured: config.configured, model: config.model,
         endpoint: config.endpoint ? new URL(config.endpoint).origin : null,
-        usage: { instructionCharacters, outputCap: config.maxTokens, tokenField: config.tokenField }
+        usage: { instructionCharacters, intakeInstructionCharacters, outputCap: config.maxTokens, tokenField: config.tokenField }
       });
-      if (req.method === 'POST' && url.pathname === '/api/recommend') {
+      if (req.method === 'POST' && ['/api/intake', '/api/recommend'].includes(url.pathname)) {
         if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] || '')) throw new DemoError('Use Content-Type: application/json.', 415);
-        if (running) throw new DemoError('A recommendation is already running. Please wait.', 429);
+        if (running) throw new DemoError('A request is already running. Please wait.', 429);
         const input = await body(req);
         const task = validateTask(input?.task);
+        const intakeRequest = url.pathname === '/api/intake';
+        const intake = intakeRequest ? null : validateIntake(input?.intake, { allowEdited: true });
         const source = input.source;
         if (!['chatgpt', 'endpoint'].includes(source)) throw new DemoError('Choose ChatGPT or your configured endpoint.', 400);
         // Two requests may arrive while their bodies are being read.
-        if (running) throw new DemoError('A recommendation is already running. Please wait.', 429);
+        if (running) throw new DemoError('A request is already running. Please wait.', 429);
         running = true;
         try {
           if (source === 'chatgpt') {
@@ -106,12 +111,15 @@ export function createApp(config = readConfig(), fetchImpl = fetch, auth = null)
             const tokens = await auth.access(session);
             if (!tokens.models) tokens.models = await listChatGPTModels(tokens.accessToken, fetchImpl);
             if (!tokens.models.some(model => model.id === input.model)) throw new DemoError('Choose a model available to your ChatGPT account.', 400);
-            const result = await recommendWithChatGPT(task, catalog, { accessToken: tokens.accessToken, model: input.model, timeout: config.timeout }, fetchImpl);
+            const options = { accessToken: tokens.accessToken, model: input.model, timeout: config.timeout };
+            const result = intakeRequest
+              ? await inferIntakeWithChatGPT(task, options, fetchImpl)
+              : await recommendWithChatGPT(task, catalog, options, fetchImpl, intake);
             // A sign-out or account switch in another tab must not publish stale account work.
             if (session.credentials.get(session.activeId) !== tokens) throw new DemoError('Your ChatGPT account changed. Submit again.', 409);
             return json(200, result);
           }
-          return json(200, await recommend(task, catalog, config, fetchImpl));
+          return json(200, intakeRequest ? await inferIntake(task, config, fetchImpl) : await recommend(task, catalog, config, fetchImpl, intake));
         }
         finally { running = false; }
       }

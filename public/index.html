@@ -45,7 +45,7 @@
         <h1><label for="task">I want to…</label></h1>
         <div class="input-box" id="input-box">
           <textarea id="task" minlength="20" maxlength="8000" rows="5" required aria-describedby="usage-summary privacy" placeholder="Describe what you're working on, and anything that matters to you."></textarea>
-          <div class="input-actions"><button class="primary" type="submit" id="analyze" disabled>Find my approach</button></div>
+          <div class="input-actions"><button class="primary" type="submit" id="analyze" disabled>Check my task</button></div>
         </div>
         <div class="connection-controls">
           <button class="signin" type="button" id="login" disabled>Continue with ChatGPT</button>
@@ -64,6 +64,19 @@
         <p class="privacy" id="privacy">Sign in to use your ChatGPT plan, or choose an API / local model in Setup. Tasks are not saved by this app.</p>
         <div id="status" role="status" aria-live="polite"></div>
         <a id="usage-error" class="usage-action" href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer" hidden>Manage usage</a>
+      </form>
+    </section>
+    <section id="intake-review" class="intake-review" hidden aria-labelledby="intake-title">
+      <p class="eyebrow">Before we score</p>
+      <h2 id="intake-title" tabindex="-1">Check my understanding</h2>
+      <p class="intake-intro">These are draft answers from your description. Edit anything, or continue as-is—even when an answer is unknown. The recommendation will use these assumptions.</p>
+      <form id="intake-form">
+        <div id="intake-fields" class="intake-fields"></div>
+        <div class="intake-actions">
+          <div><p>Scoring starts only when you continue.</p><p id="review-usage" hidden></p></div>
+          <button class="primary" type="submit" id="recommend" disabled>Find my approach</button>
+        </div>
+        <p id="review-error" class="review-error" role="status"></p>
       </form>
     </section>
     <section id="result" class="result" hidden aria-labelledby="profile-title">

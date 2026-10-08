@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createApp } from '../server.mjs';
 import { readConfig } from '../model.mjs';
-import { sampleResult, sampleTask } from './fixtures.mjs';
+import { sampleIntake, sampleResult, sampleTask } from './fixtures.mjs';
 import { httpRequest } from './http-request.mjs';
 
 async function start(t, server) {
@@ -11,7 +11,7 @@ async function start(t, server) {
   t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
   return `http://127.0.0.1:${server.address().port}`;
 }
-const post = (url, task = sampleTask, headers = {}) => fetch(url + '/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify({ task, source: 'endpoint' }) });
+const post = (url, task = sampleTask, headers = {}) => fetch(url + '/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify({ task, source: 'endpoint', intake: sampleIntake }) });
 
 test('real HTTP roundtrip through a fake OpenAI-compatible endpoint', async t => {
   let seen;

@@ -8,7 +8,7 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { createAuth, registrationStore, verifyIdentity } from '../auth.mjs';
 import { createApp } from '../server.mjs';
 import { readConfig } from '../model.mjs';
-import { sampleResult, sampleTask } from './fixtures.mjs';
+import { sampleIntake, sampleResult, sampleTask } from './fixtures.mjs';
 import { httpRequest } from './http-request.mjs';
 
 const issuer = 'https://auth.openai.com';
@@ -308,7 +308,7 @@ async function start(t, h) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 const post = (base, route, body, cookie = '', headers = {}) => fetch(base + route, {
-  method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json', Cookie: cookie, ...headers }, body: JSON.stringify(body)
+  method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json', Cookie: cookie, ...headers }, body: JSON.stringify({ ...(route === '/api/recommend' ? { intake: sampleIntake } : {}), ...body })
 });
 async function httpLogin(base, h) {
   const begun = await post(base, '/api/auth/login', {});
@@ -359,14 +359,17 @@ test('HTTP subscription requests enforce the account model list and never fall b
     assert.equal(options.headers.Authorization, 'Bearer access-secret-client-one');
     if (url.endsWith('/models')) return Response.json({ models: [{ slug: 'account-model', display_name: 'Account Model', visibility: 'list', metadata: 'x'.repeat(1024 * 1024) }] });
     assert.equal(url, 'https://api.openai.com/v1/responses');
-    assert.equal(JSON.parse(options.body).model, 'account-model');
-    return new Response(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: JSON.stringify(sampleResult) })}\n\ndata: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed' } })}\n\n`);
+    const input = JSON.parse(options.body);
+    assert.equal(input.model, 'account-model');
+    const result = input.instructions.includes('Do not score dimensions') ? sampleIntake : sampleResult;
+    return new Response(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: JSON.stringify(result) })}\n\ndata: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed' } })}\n\n`);
   };
   const unspecified = await post(base, '/api/recommend', { task: sampleTask, model: 'account-model' });
   assert.equal(unspecified.status, 400);
   assert.equal(inferenceCalls.length, 0);
   const unauthenticated = await post(base, '/api/recommend', { task: sampleTask, source: 'chatgpt', model: 'account-model' });
   assert.equal(unauthenticated.status, 401);
+  assert.equal((await post(base, '/api/intake', { task: sampleTask, source: 'chatgpt', model: 'account-model' })).status, 401);
   assert.equal(inferenceCalls.length, 0);
   const cookie = await httpLogin(base, h);
   const discovery = await fetch(base + '/api/auth/models', { headers: { Cookie: cookie } });
@@ -376,11 +379,18 @@ test('HTTP subscription requests enforce the account model list and never fall b
   const invalid = await post(base, '/api/recommend', { task: sampleTask, source: 'chatgpt', model: 'owner-model' }, cookie);
   assert.equal(invalid.status, 400);
   assert.deepEqual(inferenceCalls.map(call => call.url), ['https://api.openai.com/v1/models']);
+  const intake = await post(base, '/api/intake', { task: sampleTask, source: 'chatgpt', model: 'account-model' }, cookie);
+  assert.equal(intake.status, 200);
+  assert.deepEqual(await intake.json(), sampleIntake);
+  assert.equal(inferenceCalls.length, 2, 'intake invokes exactly one model request');
   const valid = await post(base, '/api/recommend', { task: sampleTask, source: 'chatgpt', model: 'account-model' }, cookie);
   assert.equal(valid.status, 200);
   assert.deepEqual(await valid.json(), sampleResult);
+  const recommendation = JSON.parse(inferenceCalls.at(-1).options.body);
+  assert.deepEqual(JSON.parse(recommendation.input[0].content).intake, sampleIntake);
   h.state.inference = async () => Response.json({ error: { code: 'subscription_sharing_usage_limit_exceeded' } }, { status: 429 });
   const limited = await post(base, '/api/recommend', { task: sampleTask, source: 'chatgpt', model: 'account-model' }, cookie);
   assert.equal(limited.status, 429);
+  assert.equal((await post(base, '/api/intake', { task: sampleTask, source: 'chatgpt', model: 'account-model' }, cookie)).status, 429);
   assert.equal(h.state.calls.filter(call => call.url.includes('chat/completions')).length, 0);
 });

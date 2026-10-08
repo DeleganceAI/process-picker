@@ -10,6 +10,7 @@ const make = (tag, text, className) => {
   return el;
 };
 let catalog, config, session, activeReveal, activeRequest, busy = false, authBusy = true, authFailed = false;
+let intakeQuestions = [], intakeAnswers = null, intakeTask = '', busyStage = '';
 
 async function request(path, body, signal) {
   const response = await fetch(path, body === undefined ? { signal } : {
@@ -26,7 +27,7 @@ async function request(path, body, signal) {
 }
 
 function ready() {
-  if (!catalog || busy || authBusy) return false;
+  if (!catalog || !intakeQuestions.length || busy || authBusy) return false;
   return $('source').value === 'endpoint' ? config?.configured :
     session?.signedIn && session.planEnabled && !session.needsWelcome && Boolean($('model').value);
 }
@@ -35,9 +36,14 @@ function renderUsage() {
   const source = $('source').value;
   const model = source === 'endpoint' ? config?.model : $('model').selectedOptions[0]?.value ? $('model').selectedOptions[0].textContent : null;
   $('usage-notice').hidden = !model;
+  $('review-usage').hidden = !model;
   if (!model) return;
-  const notice = usageNotice({ ...config?.usage, task: $('task').value, source, model });
+  const notice = usageNotice({
+    ...config?.usage, task: $('task').value, source, model,
+    stage: intakeAnswers ? 'recommend' : 'intake', answers: intakeAnswers || []
+  });
   $('usage-summary').textContent = notice.summary;
+  $('review-usage').textContent = notice.summary;
   $('usage-detail').textContent = notice.detail;
 }
 
@@ -54,7 +60,11 @@ function renderConnection() {
   for (const id of ['source', 'account', 'account-login', 'login', 'logout', 'retry-auth']) $(id).disabled = locked || !catalog;
   $('model').disabled = locked || !hasPlan || $('model').options.length < 2;
   $('analyze').disabled = !ready();
-  $('analyze').textContent = busy ? activeReveal ? 'Revealing scores…' : 'Thinking…' : 'Find my approach';
+  $('analyze').hidden = Boolean(intakeAnswers);
+  $('analyze').textContent = busy ? 'Reading your task…' : 'Check my task';
+  $('recommend').disabled = !ready() || !intakeAnswers;
+  $('recommend').textContent = busyStage === 'recommend' ? activeReveal ? 'Revealing scores…' : 'Finding your approach…' : 'Find my approach';
+  for (const input of $('intake-fields').querySelectorAll('textarea')) input.readOnly = busy;
   $('account-status').textContent = authBusy ? 'Checking sign-in…' : session?.signedIn ?
     `${session.account?.label || 'Signed in'}${hasPlan ? '' : ' · ChatGPT plan access was not enabled.'}` : 'Sign in to use your ChatGPT plan.';
   $('connection').textContent = config?.configured ? `Connected to ${config.model}` : 'No API / local model connected yet';
@@ -69,6 +79,7 @@ function renderConnection() {
 async function refreshAuth() {
   authBusy = true; authFailed = false; session = null;
   $('status').className = ''; $('status').textContent = ''; $('usage-error').hidden = true;
+  $('review-error').textContent = '';
   $('account-options').hidden = true;
   $('model').replaceChildren(make('option', 'Choose a model'));
   $('model').firstChild.value = '';
@@ -224,21 +235,88 @@ async function showResult(data, signal) {
 
 function showError(error) {
   $('status').className = 'error'; $('status').textContent = error.message;
+  $('review-error').textContent = intakeAnswers ? error.message : '';
   $('usage-error').hidden = $('source').value !== 'chatgpt' || error.code !== 'subscription_sharing_usage_limit_exceeded';
 }
-async function analyze(task) {
-  if (busy) throw new Error('A recommendation is already running.');
+function invalidateIntake() {
+  if (intakeTask && $('task').value !== intakeTask) {
+    intakeTask = ''; intakeAnswers = null;
+    $('intake-review').hidden = true;
+    $('review-error').textContent = '';
+    $('result').hidden = true;
+    document.querySelector('main').classList.remove('has-result');
+    $('status').className = '';
+    $('status').textContent = 'Your task changed. Check it again before scoring.';
+  }
+  renderConnection();
+}
+
+function renderIntake() {
+  const fields = intakeQuestions.map(question => {
+    const answer = intakeAnswers.find(item => item.id === question.id);
+    const field = make('div', undefined, 'intake-field');
+    const heading = make('div', undefined, 'intake-field-heading');
+    const label = make('label', question.label); label.htmlFor = `intake-${question.id}`;
+    const badge = make('span', undefined, 'answer-status');
+    const statuses = { stated: 'Stated', inferred: 'Inferred', unknown: 'Unknown', edited: 'Your edit' };
+    badge.textContent = statuses[answer.status];
+    heading.append(label, badge);
+    const prompt = make('p', question.question, 'intake-question');
+    prompt.id = `intake-question-${question.id}`;
+    const input = make('textarea'); input.id = `intake-${question.id}`;
+    input.rows = 2; input.maxLength = 600; input.value = answer.answer;
+    input.setAttribute('aria-describedby', `${prompt.id} intake-help-${question.id}`);
+    const help = make('p', answer.evidence || question.hint, 'intake-evidence');
+    help.id = `intake-help-${question.id}`;
+    input.addEventListener('input', () => {
+      answer.answer = input.value;
+      answer.status = 'edited'; answer.evidence = '';
+      badge.textContent = statuses.edited; help.textContent = question.hint;
+      $('result').hidden = true;
+      $('status').className = ''; $('status').textContent = '';
+      $('review-error').textContent = '';
+      renderUsage();
+    });
+    field.append(heading, prompt, input, help);
+    return field;
+  });
+  $('intake-fields').replaceChildren(...fields);
+  $('intake-review').hidden = false;
+  document.querySelector('main').classList.add('has-result');
+  $('intake-title').focus({ preventScroll: true });
+  $('intake-review').scrollIntoView({ block: 'start' });
+}
+
+async function runStage(stage, task) {
+  if (busy) throw new Error('A request is already running.');
   if (!ready()) throw new Error('Connect your model and choose it before asking for a recommendation.');
   if (typeof task !== 'string' || task.trim().length < 20 || task.length > 8000) throw new Error('Describe your task in 20–8,000 characters.');
+  if (stage === 'recommend' && (!intakeAnswers || task !== intakeTask)) throw new Error('Check your task before asking for a recommendation.');
+  $('task').value = task;
+  if (stage === 'intake') invalidateIntake();
   const source = $('source').value, model = $('model').value;
+  const body = {
+    task, source, ...(source === 'chatgpt' ? { model } : {}),
+    ...(stage === 'recommend' ? { intake: { answers: intakeAnswers.map(answer => answer.answer.trim()
+      ? { ...answer } : { id: answer.id, answer: 'Unknown', status: 'unknown', evidence: '' }) } } : {})
+  };
   const controller = new AbortController(); activeRequest = controller;
   activeReveal?.cancel(); activeReveal = null;
-  busy = true; renderConnection(); $('usage-error').hidden = true;
-  $('task').value = task; renderUsage(); $('task').readOnly = true; $('input-box').setAttribute('aria-busy', 'true');
+  busy = true; busyStage = stage; renderConnection(); $('usage-error').hidden = true;
+  renderUsage(); $('task').readOnly = true; $('input-box').setAttribute('aria-busy', 'true');
+  $('intake-form').setAttribute('aria-busy', String(stage === 'recommend'));
   $('result').hidden = true;
-  $('status').className = ''; $('status').textContent = 'Finding an approach that fits your task…';
+  $('review-error').textContent = '';
+  $('status').className = ''; $('status').textContent = stage === 'intake' ? 'Drafting a few answers from your task. You can edit them before scoring.' : 'Finding an approach using your reviewed answers…';
   try {
-    const data = await request('/api/recommend', { task, source, ...(source === 'chatgpt' ? { model } : {}) }, controller.signal);
+    const data = await request(`/api/${stage}`, body, controller.signal);
+    if (controller.signal.aborted) return;
+    if (stage === 'intake') {
+      intakeTask = task; intakeAnswers = data.answers;
+      renderIntake();
+      $('status').textContent = 'Your draft answers are ready. Edit anything, or continue with these assumptions.';
+      return { reviewRequired: true, answers: intakeAnswers };
+    }
     if (!await showResult(data, controller.signal)) return;
     $('status').textContent = `All seven scores are revealed. Recommended approach: ${$('result-title').textContent}.`;
     return data;
@@ -251,19 +329,22 @@ async function analyze(task) {
     throw error;
   } finally {
     if (activeRequest === controller) activeRequest = null;
-    busy = false; renderConnection();
+    busy = false; busyStage = ''; renderConnection();
     $('task').readOnly = false; $('input-box').setAttribute('aria-busy', 'false');
+    $('intake-form').setAttribute('aria-busy', 'false');
   }
 }
+function prepareTask(task) { return runStage('intake', task); }
+function recommendTask() { return runStage('recommend', $('task').value); }
 
 async function init() {
-  $('task').addEventListener('input', renderUsage);
+  $('task').addEventListener('input', invalidateIntake);
   $('show-all').addEventListener('click', () => activeReveal?.showAll());
   window.addEventListener('pagehide', () => {
     activeRequest?.abort(); activeReveal?.cancel();
   });
-  $('source').addEventListener('change', () => { $('status').textContent = ''; $('usage-error').hidden = true; renderConnection(); });
-  $('model').addEventListener('change', () => { $('status').textContent = ''; renderConnection(); });
+  $('source').addEventListener('change', () => { $('status').textContent = ''; $('review-error').textContent = ''; $('usage-error').hidden = true; renderConnection(); });
+  $('model').addEventListener('change', () => { $('status').textContent = ''; $('review-error').textContent = ''; renderConnection(); });
   $('login').addEventListener('click', () => login());
   $('account-login').addEventListener('click', () => login());
   $('retry-auth').addEventListener('click', refreshAuth);
@@ -282,9 +363,14 @@ async function init() {
   $('download').addEventListener('click', () => download('process-radar.svg', new XMLSerializer().serializeToString($('chart').firstChild), 'image/svg+xml'));
   $('task-form').addEventListener('submit', event => {
     event.preventDefault();
-    if (!busy) analyze($('task').value).catch(showError);
+    if (!busy && !intakeAnswers) prepareTask($('task').value).catch(showError);
   });
-  [catalog, config] = await Promise.all([request('/api/catalog'), request('/api/config')]);
+  $('intake-form').addEventListener('submit', event => {
+    event.preventDefault();
+    if (!busy) recommendTask().catch(showError);
+  });
+  const [loadedCatalog, loadedConfig, intake] = await Promise.all([request('/api/catalog'), request('/api/config'), request('/api/intake/questions')]);
+  catalog = loadedCatalog; config = loadedConfig; intakeQuestions = intake.questions;
   await refreshAuth();
   const page = new URL(window.location.href);
   if (page.searchParams.has('signin')) {
@@ -295,11 +381,11 @@ async function init() {
   if (context?.registerTool) {
     const lifecycle = new AbortController();
     Promise.resolve(context.registerTool({
-      name: 'recommend_process', title: 'Recommend a process',
-      description: 'Send a task description to the model and funding source explicitly selected in the page, then display a suggested process, radar chart, and rationale. Uses ChatGPT plan allowance or the configured endpoint credentials. Requires sign-in/model setup first.',
+      name: 'prepare_process', title: 'Prepare a process recommendation',
+      description: 'Draft editable answers about a task using the model and funding source selected in the page. Opens a review screen; the user must click Find my approach to score and recommend a process. This tool never scores. Uses ChatGPT plan allowance or configured endpoint credentials. Requires sign-in/model setup first.',
       inputSchema: { type: 'object', properties: { task: { type: 'string', minLength: 20, maxLength: 8000 } }, required: ['task'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: true },
-      execute: async input => analyze(input?.task)
+      execute: async input => prepareTask(input?.task)
     }, { signal: lifecycle.signal })).catch(() => {});
     window.addEventListener('pagehide', () => lifecycle.abort(), { once: true });
   }

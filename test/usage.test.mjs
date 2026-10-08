@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { estimateInputTokens, usageNotice } from '../public/usage.mjs';
 import { buildMessages, readConfig } from '../model.mjs';
+import { buildIntakeMessages } from '../intake.mjs';
 import { catalog, createApp } from '../server.mjs';
 
 test('input estimates include instructions, serialized task, framing, and coarse rounding', () => {
@@ -24,13 +25,25 @@ test('missing or invalid metadata never reports a deceptively small estimate', (
 });
 
 test('usage notice names model and calls out variable usage and no retries', () => {
-  const notice = usageNotice({ instructionCharacters: 16000, task: 'a task', source: 'chatgpt', model: ' GPT-5.5 ' });
-  assert.equal(notice.summary, 'GPT-5.5 · ~4,100 input tokens + reply/reasoning · 1 AI request');
-  assert.match(notice.detail, /rubric and task/);
+  const notice = usageNotice({ intakeInstructionCharacters: 4000, instructionCharacters: 16000, task: 'a task', source: 'chatgpt', model: ' GPT-5.5 ' });
+  assert.equal(notice.summary, 'GPT-5.5 · ~1,100 input tokens + reply/reasoning · call 1 of 2');
+  assert.match(notice.detail, /intake instructions and task/);
+  assert.match(notice.detail, /score only after you continue/);
   assert.match(notice.detail, /model and language/);
   assert.match(notice.detail, /No automatic retries/);
   assert.match(notice.detail, /no local output-token cap/);
   assert.match(usageNotice().summary, /^Choose a model/);
+});
+
+test('review estimates use scoring instructions and all answer text including provenance', () => {
+  const answers = [{ id: 'expertise', answer: 'x'.repeat(800), status: 'inferred', evidence: 'No explicit statement.' }];
+  const notice = usageNotice({ stage: 'recommend', intakeInstructionCharacters: 4000, instructionCharacters: 16000, task: 'a task', answers, model: 'local' });
+  const characters = 16000 + JSON.stringify({ taskDescription: 'a task', intake: { answers } }).length + 80;
+  assert.equal(estimateInputTokens(16000, 'a task', answers), Math.ceil(characters / 400) * 100);
+  assert.match(notice.summary, /~4,300 input tokens.*call 2 of 2/);
+  assert.match(notice.detail, /scoring instructions, task, and reviewed answers/);
+  assert.match(notice.detail, /additional for each call/);
+  assert.match(usageNotice({ instructionCharacters: 16000 }).summary, /estimate unavailable/);
 });
 
 test('output caps follow the selected source and configured token field', () => {
@@ -53,6 +66,7 @@ test('public config supplies only safe estimate metadata from the actual prompt 
   assert.deepEqual(Object.keys(metadata).sort(), ['configured', 'endpoint', 'model', 'usage']);
   assert.deepEqual(metadata.usage, {
     instructionCharacters: buildMessages('A valid task to estimate.', catalog)[0].content.length,
+    intakeInstructionCharacters: buildIntakeMessages('A valid task to estimate.')[0].content.length,
     outputCap: 2048,
     tokenField: 'max_completion_tokens'
   });

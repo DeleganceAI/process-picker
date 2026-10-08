@@ -1,5 +1,16 @@
 // Deliberately authored test fixture, not an LLM-generated recommendation.
 export const sampleTask = 'Redesign an uncertain subsystem with human review, local models, reusable phases, and strict limits. Tests cover regressions but not architectural fit.';
+export const sampleIntake = { answers: [
+  { id: 'expertise', answer: 'Unknown', status: 'unknown', evidence: '' },
+  { id: 'audience', answer: 'Unknown', status: 'unknown', evidence: '' },
+  { id: 'consequences', answer: 'Unknown', status: 'unknown', evidence: '' },
+  { id: 'checks', answer: 'Regression tests and human review; architectural fit needs judgment.', status: 'stated', evidence: 'Tests cover regressions but not architectural fit.' },
+  { id: 'uncertainty', answer: 'The direction is uncertain.', status: 'stated', evidence: 'Redesign an uncertain subsystem' },
+  { id: 'resources', answer: 'Strict limits are wanted; exact time and spend limits are unknown.', status: 'stated', evidence: 'strict limits' },
+  { id: 'oversight', answer: 'Human review is wanted; reviewer availability is unknown.', status: 'stated', evidence: 'human review' },
+  { id: 'constraints', answer: 'Use local models.', status: 'stated', evidence: 'local models' },
+  { id: 'reuse', answer: 'A repeatable process is likely useful.', status: 'inferred', evidence: 'reusable phases' }
+] };
 export const sampleResult = {
   summary: 'Explore a subsystem redesign with human judgment and a reusable process.',
   recommendedApproach: 'playbooks',
