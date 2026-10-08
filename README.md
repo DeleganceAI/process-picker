@@ -18,7 +18,7 @@ Requires Node.js 22 or later. There are no package dependencies or build step.
 npm start
 ```
 
-Open <http://127.0.0.1:4317>. The reference charts and cheat sheet work without an LLM connection.
+Open <http://127.0.0.1:4317>. Start with the blank “I want to…” prompt. Recommendations need a connected model; the cheat sheet remains available under Setup without one.
 
 The default configuration uses **GPT-5.5 through OpenAI**. For recommendations, copy `.env.example` to `.env` if needed, fill in `OPENAI_API_KEY`, and restart. The prepared local checkout already contains a key-free `.env`:
 
@@ -50,10 +50,10 @@ The [GPT-5.5 model documentation](https://developers.openai.com/api/docs/models/
 ## Use it in the talk
 
 1. Connect a local or hosted model before the session.
-2. Click an example task or describe your own. Include the checks you trust, human involvement, uncertainty, reuse, model constraints, and resource limits.
-3. Generate the suggestion. The green shape is the recommended way of working for this task; dashed blue is the selected reference profile.
-4. Review the reasoning, assumptions, questions, tradeoff, and alternative. Revise the task description and rerun as needed.
-5. Switch references with the dropdown. Download the radar as SVG for slides or the recommendation as JSON.
+2. Describe your task in the free-form box. Include any checks you trust, human involvement, uncertainty, or constraints that matter.
+3. Click “Find my approach” to reveal the recommendation, practical first steps, and radar. The green shape is the suggested way of working; dashed blue is that approach's reference profile.
+4. Expand “Reasoning & alternatives” for assumptions, questions, the tradeoff, and score explanations. Revise your description and rerun as needed.
+5. Use “Save chart” for an SVG, or save the recommendation as JSON from the expanded reasoning.
 
 The LLM chooses a contextual starting point. There is no total-score, polygon-area, or distance-based winner. “Needs Strong Verifier” measures dependence on automatic success checks; a task with weak automatic checks should usually get low dependence, even when it is high-stakes.
 
