@@ -14,6 +14,26 @@ const make = (tag, text, className) => {
 let catalog, config, session, activeReveal, activeRequest, busy = false, authBusy = true, authFailed = false;
 let intakeQuestions = [], intakeAnswers = null, intakeTask = '', busyStage = '';
 let activeAdvance = null, advanceStage = '', advancePaused = false, resultData = null;
+const AUTH_DRAFT_KEY = 'process-radar:auth-draft';
+
+function saveAuthDraft() {
+  const draft = $('task').value;
+  try {
+    if (draft.length > 8000) throw new Error('Draft too long');
+    if (draft) window.sessionStorage.setItem(AUTH_DRAFT_KEY, draft);
+    else window.sessionStorage.removeItem(AUTH_DRAFT_KEY);
+  } catch {
+    if (draft) throw new Error('Your browser could not keep this draft during sign-in. Copy your task somewhere safe, clear the box, then try signing in again.');
+  }
+}
+
+function restoreAuthDraft() {
+  try {
+    const draft = window.sessionStorage.getItem(AUTH_DRAFT_KEY);
+    if (draft && draft.length <= 8000 && !$('task').value) $('task').value = draft;
+    window.sessionStorage.removeItem(AUTH_DRAFT_KEY);
+  } catch { /* Storage may be disabled; the composer still works. */ }
+}
 
 function stopAdvance() {
   activeAdvance?.cancel(); activeAdvance = null; advanceStage = '';
@@ -119,10 +139,10 @@ function renderConnection() {
     `${session.account?.label || 'Signed in'}${hasPlan ? '' : ' · ChatGPT plan access was not enabled.'}` : 'Sign in to use your ChatGPT plan.';
   $('connection').textContent = config?.configured ? `Connected to ${config.model}` : 'No API / local model connected yet';
   $('privacy').textContent = chatgpt ? hasPlan ?
-    'Sent to OpenAI using your ChatGPT plan when you submit. Not saved by this app; provider retention may apply.' :
-    'Sign in to use your ChatGPT plan, or choose an API / local model in Setup. Tasks are not saved by this app.' :
-    config?.configured ? `Sent to ${config.endpoint} when you submit. Uses the configured endpoint’s credentials, not your ChatGPT plan. Not saved by this app; provider retention may apply.` :
-    'Configure an API / local model in Setup before submitting. Tasks are not saved by this app.';
+    'Sent to OpenAI using your ChatGPT plan when you submit. Not saved on this server; provider retention may apply.' :
+    'Sign in to use your ChatGPT plan, or choose an API / local model in Setup. Your draft stays in this tab during sign-in.' :
+    config?.configured ? `Sent to ${config.endpoint} when you submit. Uses the configured endpoint’s credentials, not your ChatGPT plan. Not saved on this server; provider retention may apply.` :
+    'Configure an API / local model in Setup before submitting. Tasks are not saved on this server.';
   renderUsage();
 }
 
@@ -148,11 +168,11 @@ async function refreshAuth() {
       for (const model of models) {
         const option = make('option', model.name); option.value = model.id; $('model').append(option);
       }
-      if (models.some(model => model.id === 'gpt-5.5')) $('model').value = 'gpt-5.5';
+      if (models.some(model => model.id === 'gpt-6-luna')) $('model').value = 'gpt-6-luna';
       if (!models.length) throw new Error('No models are available for this ChatGPT account. Check your plan access or try again.');
       if (!$('model').value) {
         $('status').className = '';
-        $('status').textContent = 'GPT-5.5 is not available for this account. Choose an available model to continue.';
+        $('status').textContent = 'GPT-6 Luna is not available for this account. Choose an available model to continue.';
       }
     }
     if (session.authError) showError(new Error(session.authError));
@@ -177,6 +197,7 @@ async function login(accountId = $('account').value) {
     });
     const target = new URL(url);
     if (target.origin !== 'https://auth.openai.com' || target.username || target.password) throw new Error('The sign-in URL was not recognized.');
+    saveAuthDraft();
     window.location.assign(target.href);
   } catch (error) {
     authBusy = false; renderConnection(); showError(error);
@@ -406,11 +427,15 @@ function prepareTask(task, { autoAdvance = true } = {}) { return runStage('intak
 function recommendTask() { return runStage('recommend', $('task').value); }
 
 async function init() {
+  restoreAuthDraft();
   $('task').addEventListener('input', invalidateIntake);
   $('show-all').addEventListener('click', () => activeReveal?.showAll());
   window.addEventListener('pagehide', () => {
     stopAdvance();
     activeRequest?.abort(); activeReveal?.cancel();
+  });
+  window.addEventListener('pageshow', event => {
+    if (event.persisted) { restoreAuthDraft(); refreshAuth(); }
   });
   document.addEventListener('visibilitychange', () => { if (document.hidden) pauseAdvance(); });
   $('intake-fields').addEventListener('focusin', pauseAdvance);
