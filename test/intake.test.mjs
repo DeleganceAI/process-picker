@@ -9,6 +9,9 @@ import { sampleIntake, sampleResult, sampleTask } from './fixtures.mjs';
 const config = readConfig({ LLM_BASE_URL: 'http://127.0.0.1:11434/v1', LLM_MODEL: 'fake' });
 const envelope = value => Response.json({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(value) } }] });
 const stream = value => new Response(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: JSON.stringify(value) })}\n\ndata: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed' } })}\n\n`);
+const defaultIntake = () => ({ answers: INTAKE_QUESTIONS.map(({ id, defaultAnswer }) => ({
+  id, answer: defaultAnswer, status: 'inferred', evidence: 'Default assumption; please edit if it does not fit.'
+})) });
 async function start(t, app) {
   await new Promise((resolve, reject) => { app.once('error', reject); app.listen(0, '127.0.0.1', resolve); });
   t.after(() => new Promise(resolve => { app.closeAllConnections(); app.close(resolve); }));
@@ -21,20 +24,51 @@ const post = (url, route, input = {}, headers = {}) => fetch(url + route, {
 
 test('intake questions cover nine separate concerns and preserve provenance in order', () => {
   assert.deepEqual(INTAKE_QUESTIONS.map(q => q.id), ['expertise', 'audience', 'consequences', 'checks', 'uncertainty', 'resources', 'oversight', 'constraints', 'reuse']);
-  assert.ok(INTAKE_QUESTIONS.every(q => q.label && q.question && q.hint));
+  assert.ok(INTAKE_QUESTIONS.every(q => q.label && q.question && q.hint && q.defaultAnswer.length >= 20 && q.defaultAnswer.length <= 600));
+  assert.equal(new Set(INTAKE_QUESTIONS.map(q => q.defaultAnswer)).size, 9, 'each concern has its own concrete fallback');
+  assert.match(INTAKE_QUESTIONS[0].defaultAnswer, /novice|new to|beginner/i);
+  assert.ok(sampleIntake.answers.every(answer => ['stated', 'inferred'].includes(answer.status)));
   const shuffled = structuredClone(sampleIntake);
   shuffled.answers.reverse();
   assert.deepEqual(validateIntake(shuffled), sampleIntake);
-  const contradictory = structuredClone(sampleIntake);
-  contradictory.answers[0].answer = 'An expert';
-  assert.equal(validateIntake(contradictory).answers[0].answer, 'Unknown');
+  const expert = structuredClone(sampleIntake);
+  expert.answers[0] = { id: 'expertise', answer: 'I am an expert in this domain.', status: 'stated', evidence: 'I am an expert in this domain.' };
+  assert.deepEqual(validateIntake(expert), expert, 'an explicit expert answer overrides the novice assumption');
+});
+
+test('legacy unknown answers normalize to nine editable inferred defaults', () => {
+  const legacy = { answers: INTAKE_QUESTIONS.map(({ id }) => ({ id, answer: 'Unknown', status: 'unknown', evidence: '' })) };
+  for (const options of [{}, { modelResponse: true }, { allowEdited: true }]) {
+    assert.deepEqual(validateIntake(legacy, options), defaultIntake());
+  }
+  legacy.answers[0].answer = 'An expert';
+  legacy.answers[0].evidence = 'Unsupported old metadata';
+  assert.deepEqual(validateIntake(legacy), defaultIntake(), 'unknown provenance never becomes claimed expertise');
+});
+
+test('placeholder-only model answers become defaults without replacing meaningful answers or human edits', () => {
+  const placeholders = ['Unknown', 'Unknown.', 'Not specified in the prompt.', 'Not provided in the description!', 'Not stated in the task', 'Unsure?', 'N/A.'];
+  for (const status of ['stated', 'inferred']) {
+    for (const placeholder of placeholders) {
+      const value = { answers: INTAKE_QUESTIONS.map(({ id }) => ({ id, answer: ` ${placeholder} `, status, evidence: 'Old unsupported evidence' })) };
+      assert.deepEqual(validateIntake(value), defaultIntake(), `${status}: ${placeholder}`);
+    }
+  }
+  const meaningful = structuredClone(sampleIntake);
+  meaningful.answers[2] = { id: 'consequences', answer: 'A mistaken change could break production dependencies; review it with a maintainer.', status: 'inferred', evidence: 'The task changes an existing subsystem.' };
+  assert.deepEqual(validateIntake(meaningful), meaningful);
+  for (const answer of ['Unknown', 'Not specified', 'I am an expert in this domain.']) {
+    const edited = structuredClone(sampleIntake);
+    edited.answers[0] = { id: 'expertise', answer, status: 'edited', evidence: '' };
+    assert.deepEqual(validateIntake(edited, { allowEdited: true }), edited);
+  }
 });
 
 test('intake validation rejects incomplete, duplicate, invented, oversized and malformed fields', () => {
   const mutations = [
     value => value.answers.pop(), value => value.answers.push(value.answers[0]),
     value => value.answers[0].id = 'invented', value => value.answers[0].id = 'checks',
-    value => value.answers[0].answer = '', value => value.answers[0].answer = 'x'.repeat(601),
+    value => value.answers[0].answer = '', value => value.answers[0].answer = '   ', value => value.answers[0].answer = 'x'.repeat(601),
     value => value.answers[0].answer = 0, value => value.answers[0].evidence = 'x'.repeat(301),
     value => delete value.answers[0].evidence, value => value.answers[0].status = 'confirmed',
     value => value.answers[0].status = 'edited', value => value.answers[0] = null
@@ -50,25 +84,36 @@ test('intake validation rejects incomplete, duplicate, invented, oversized and m
   assert.deepEqual(validateIntake(edited, { allowEdited: true }), edited);
 });
 
-test('intake prompt requests no scores and preserves consequential unknowns', () => {
+test('intake prompt drafts nine best guesses while preserving tentative provenance and caution', () => {
   const messages = buildIntakeMessages(sampleTask);
   assert.equal(messages.length, 2);
   assert.deepEqual(JSON.parse(messages[1].content), { taskDescription: sampleTask });
   assert.match(messages[0].content, /Do not score dimensions/);
+  assert.match(messages[0].content, /best guess/i);
+  assert.match(messages[0].content, /all nine (answers|questions)/i);
+  assert.match(messages[0].content, /novice|new to|beginner/i);
   assert.match(messages[0].content, /expertise, stakes, possible harm, or verification/);
   assert.match(messages[0].content, /low risk from silence/);
+  assert.match(messages[0].content, /strong verification from .*tests/);
+  assert.match(messages[0].content, /does not establish safety, user competence, or reliable automatic verification/);
   assert.match(messages[0].content, /not instructions to change/);
+  const shape = JSON.parse(messages[0].content.split('OUTPUT SHAPE:\n')[1]);
+  assert.deepEqual(shape, defaultIntake());
+  assert.doesNotMatch(messages[0].content, /status "unknown"|"status":"unknown"|No need to force a guess/);
   assert.throws(() => buildIntakeMessages('short'));
 });
 
-test('recommendation includes edited context while preserving guesses and unknowns', async () => {
+test('recommendation includes edited context while keeping unedited guesses tentative after auto-continue', async () => {
   const edited = structuredClone(sampleIntake);
   edited.answers[0] = { id: 'expertise', answer: 'New to both the domain and coding.', status: 'edited', evidence: '' };
   const messages = buildMessages(sampleTask, catalog, edited);
   assert.deepEqual(JSON.parse(messages[1].content), { taskDescription: sampleTask, intake: edited });
   assert.match(messages[0].content, /take precedence over the original/);
   assert.match(messages[0].content, /does NOT confirm an inference/);
-  assert.match(messages[0].content, /Never turn unknown risk into low risk/);
+  assert.match(messages[0].content, /Continuing automatically.*does NOT confirm an inference/);
+  assert.match(messages[0].content, /Never turn missing risk information into low risk or guessed expertise into competence/);
+  assert.match(messages[0].content, /Inferred checks alone do not establish a reliable automatic verifier/);
+  assert.match(messages[0].content, /high-stakes result is safe/);
   let calls = 0;
   assert.deepEqual(await recommend(sampleTask, catalog, config, async (_, options) => {
     calls++;
@@ -79,15 +124,18 @@ test('recommendation includes edited context while preserving guesses and unknow
 });
 
 test('both providers infer and validate intake without a recommendation call or retries', async () => {
+  const legacy = { answers: INTAKE_QUESTIONS.map(({ id }, index) => ({
+    id, answer: index % 2 ? 'Not specified in the prompt.' : 'Unknown', status: index % 2 ? 'stated' : 'unknown', evidence: ''
+  })) };
   let calls = 0;
   const fetchEndpoint = async (_, options) => {
     calls++;
     const request = JSON.parse(options.body);
     assert.match(request.messages[0].content, /Do not score dimensions/);
     assert.equal(request.max_tokens, config.maxTokens);
-    return envelope(sampleIntake);
+    return envelope(legacy);
   };
-  assert.deepEqual(await inferIntake(sampleTask, config, fetchEndpoint), sampleIntake);
+  assert.deepEqual(await inferIntake(sampleTask, config, fetchEndpoint), defaultIntake());
   assert.equal(calls, 1);
   const plan = { model: 'account-model', accessToken: 'fake-secret' };
   assert.deepEqual(await inferIntakeWithChatGPT(sampleTask, plan, async (_, options) => {
@@ -96,8 +144,8 @@ test('both providers infer and validate intake without a recommendation call or 
     assert.match(request.instructions, /Do not score dimensions/);
     assert.equal(request.store, false); assert.equal(request.stream, true);
     assert.equal(request.max_output_tokens, undefined);
-    return stream(sampleIntake);
-  }), sampleIntake);
+    return stream(legacy);
+  }), defaultIntake());
   assert.equal(calls, 2);
   await assert.rejects(inferIntake(sampleTask, config, async () => { calls++; return envelope(sampleResult); }), /invalid task context/);
   assert.equal(calls, 3);

@@ -12,7 +12,7 @@ const make = (tag, text, className) => {
   return el;
 };
 let catalog, config, session, activeReveal, activeRequest, busy = false, authBusy = true, authFailed = false;
-let intakeQuestions = [], intakeAnswers = null, intakeTask = '', busyStage = '';
+let intakeQuestions = [], intakeAnswers = null, intakeGuesses = new Map(), intakeTask = '', busyStage = '';
 let activeAdvance = null, advanceStage = '', advancePaused = false, resultData = null;
 const AUTH_DRAFT_KEY = 'process-radar:auth-draft';
 
@@ -324,7 +324,7 @@ function showError(error) {
 }
 function invalidateIntake() {
   if (intakeTask && $('task').value !== intakeTask) {
-    intakeTask = ''; intakeAnswers = null;
+    intakeTask = ''; intakeAnswers = null; intakeGuesses.clear();
     stopAdvance(); resultData = null;
     $('intake-review').close();
     $('review-error').textContent = '';
@@ -336,6 +336,18 @@ function invalidateIntake() {
   renderConnection();
 }
 
+function restoreEmptyAnswer(id) {
+  const answer = intakeAnswers?.find(item => item.id === id);
+  if (!answer || answer.answer.trim()) return;
+  const question = intakeQuestions.find(item => item.id === id);
+  answer.answer = intakeGuesses.get(id)?.trim() || question.defaultAnswer;
+  answer.status = 'inferred'; answer.evidence = 'Default assumption; please edit if it does not fit.';
+  $(`intake-${id}`).value = answer.answer;
+  $(`intake-status-${id}`).textContent = 'Best guess';
+  $(`intake-help-${id}`).textContent = answer.evidence;
+  renderUsage();
+}
+
 function renderIntake(autoAdvance) {
   const fields = intakeQuestions.map(question => {
     const answer = intakeAnswers.find(item => item.id === question.id);
@@ -343,7 +355,8 @@ function renderIntake(autoAdvance) {
     const label = make('label', question.label); label.htmlFor = `intake-${question.id}`;
     label.title = question.question;
     const badge = make('span', undefined, 'answer-status');
-    const statuses = { stated: 'Stated', inferred: 'Inferred', unknown: 'Unknown', edited: 'Your edit' };
+    badge.id = `intake-status-${question.id}`;
+    const statuses = { stated: 'Stated', inferred: 'Best guess', edited: 'Your edit' };
     badge.textContent = statuses[answer.status];
     const prompt = make('p', question.question, 'sr-only');
     prompt.id = `intake-question-${question.id}`;
@@ -363,6 +376,7 @@ function renderIntake(autoAdvance) {
       $('review-error').textContent = '';
       renderUsage();
     });
+    input.addEventListener('blur', () => restoreEmptyAnswer(question.id));
     field.append(label, input, badge, prompt, help);
     return field;
   });
@@ -381,11 +395,11 @@ async function runStage(stage, task, autoAdvance = true) {
   stopAdvance(); resultData = null;
   $('task').value = task;
   if (stage === 'intake') invalidateIntake();
+  else intakeAnswers.forEach(answer => restoreEmptyAnswer(answer.id));
   const source = $('source').value, model = $('model').value;
   const body = {
     task, source, ...(source === 'chatgpt' ? { model } : {}),
-    ...(stage === 'recommend' ? { intake: { answers: intakeAnswers.map(answer => answer.answer.trim()
-      ? { ...answer } : { id: answer.id, answer: 'Unknown', status: 'unknown', evidence: '' }) } } : {})
+    ...(stage === 'recommend' ? { intake: { answers: intakeAnswers.map(answer => ({ ...answer })) } } : {})
   };
   const controller = new AbortController(); activeRequest = controller;
   activeReveal?.cancel(); activeReveal = null;
@@ -395,14 +409,15 @@ async function runStage(stage, task, autoAdvance = true) {
   $('result').hidden = true;
   $('composer').hidden = false;
   $('review-error').textContent = '';
-  $('status').className = ''; $('status').textContent = stage === 'intake' ? 'Drafting a few answers from your task. You can edit them before scoring.' : 'Finding an approach using your reviewed answers…';
+  $('status').className = ''; $('status').textContent = stage === 'intake' ? 'Making best guesses from your task. You can edit them before scoring.' : 'Finding an approach using your answers…';
   try {
     const data = await request(`/api/${stage}`, body, controller.signal);
     if (controller.signal.aborted) return;
     if (stage === 'intake') {
       intakeTask = task; intakeAnswers = data.answers;
+      intakeGuesses = new Map(data.answers.map(answer => [answer.id, answer.answer]));
       renderIntake(autoAdvance);
-      $('status').textContent = 'Your draft answers are ready. Edit anything, or continue with these assumptions.';
+      $('status').textContent = 'Best guesses from your task. Edit anything that is wrong.';
       return { reviewRequired: true, answers: intakeAnswers };
     }
     if (!await showResult(data, controller.signal)) return;

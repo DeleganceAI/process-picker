@@ -10,8 +10,8 @@ import { sampleResult } from './fixtures.mjs';
 const source = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8'))
   .replace(/^import .*;\n/gm, '').replace(/init\(\)\.catch\(showError\);\s*$/, '');
 const ids = ['expertise', 'audience', 'consequences', 'checks', 'uncertainty', 'resources', 'oversight', 'constraints', 'reuse'];
-const questions = ids.map(id => ({ id, label: id, question: `Question about ${id}?`, hint: `Hint about ${id}.` }));
-const draft = () => ({ answers: ids.map((id, i) => ({ id, answer: i ? 'Not specified' : 'A domain expert', status: i ? 'unknown' : 'stated', evidence: i ? '' : 'The user said so.' })) });
+const questions = ids.map(id => ({ id, label: id, question: `Question about ${id}?`, hint: `Hint about ${id}.`, defaultAnswer: `Default assumption about ${id}.` }));
+const draft = () => ({ answers: ids.map((id, i) => ({ id, answer: i ? `Best guess about ${id}.` : 'A domain expert', status: i ? 'inferred' : 'stated', evidence: i ? 'Default assumption; please edit if it does not fit.' : 'The user said so.' })) });
 const task = 'I want to build a mobile game based on Go.';
 const catalog = JSON.parse(await readFile(new URL('../data/catalog.json', import.meta.url), 'utf8'));
 
@@ -25,6 +25,8 @@ async function ui({ realResult = false } = {}) {
   };
   const element = tag => ({
     tag, value: '', textContent: '', children: [], hidden: false, open: false, disabled: false, listeners: {}, style: {},
+    set id(value) { this.elementId = value; elements.set(value, this); },
+    get id() { return this.elementId; },
     classList: { add() {}, remove() {} },
     setAttribute(name, value) { this[name] = value; },
     append(...children) { this.children.push(...children); },
@@ -104,13 +106,14 @@ test('the UI opens editable answers and starts scoring exactly once after seven 
   assert.equal(app.calls.length, 1);
   await app.advance(1);
   assert.deepEqual(app.calls.map(call => call.path), ['/api/intake', '/api/recommend']);
+  assert.ok(app.calls[1].body.intake.answers.every((answer, index) => answer.status === draft().answers[index].status));
   assert.equal(app.$('intake-review').open, false);
   assert.equal(app.$('result').hidden, false);
   await app.advance(60000);
   assert.equal(app.calls.length, 2);
 });
 
-test('continuing accepts unknown defaults and snapshots the selected source and model', async () => {
+test('continuing preserves guesses as inferred and snapshots the selected source and model', async () => {
   const app = await ui();
   await app.prepare(task);
   app.$('model').value = 'another-model';
@@ -118,9 +121,9 @@ test('continuing accepts unknown defaults and snapshots the selected source and 
   assert.equal(app.calls.length, 2);
   assert.equal(app.calls[1].path, '/api/recommend');
   assert.equal(app.calls[1].body.model, 'another-model');
-  assert.equal(app.calls[1].body.intake.answers[1].status, 'unknown');
-  assert.equal(app.calls[1].body.intake.answers[1].answer, 'Not specified');
-  assert.equal(app.calls[1].body.intake.answers[1].evidence, '');
+  assert.equal(app.calls[1].body.intake.answers[1].status, 'inferred');
+  assert.equal(app.calls[1].body.intake.answers[1].answer, draft().answers[1].answer);
+  assert.equal(app.calls[1].body.intake.answers[1].evidence, draft().answers[1].evidence);
   assert.equal(app.calls[1].body.intake.answers[0].status, 'stated');
   assert.equal(app.calls[1].body.intake.answers[0].evidence, 'The user said so.');
   assert.equal(app.$('result').hidden, false);
@@ -146,6 +149,7 @@ test('all nine compact answers retain their labels, values, and accessible descr
     assert.equal(label.textContent, questions[index].label);
     assert.equal(descriptions[0].textContent, questions[index].question);
     assert.equal(descriptions[1].textContent, draft().answers[index].evidence || questions[index].hint);
+    assert.equal(field.querySelectorAll('span')[0].textContent, index ? 'Best guess' : 'Stated');
   });
 });
 
@@ -188,7 +192,21 @@ test('editing the task invalidates the review and requires new intake before sco
   assert.equal(app.calls.length, 2);
 });
 
-test('a cleared answer can continue as Unknown and editing removes stale completion status', async () => {
+test('a stale field blur after task invalidation leaves the discarded review alone', async () => {
+  const app = await ui();
+  await app.prepare(task);
+  const input = app.fields()[0];
+  input.value = ''; input.listeners.input();
+  app.editTask(`${task} It will handle private customer data.`);
+  assert.doesNotThrow(() => input.listeners.blur());
+  assert.equal(app.state().intakeAnswers, null);
+  assert.equal(app.$('intake-review').open, false);
+  assert.equal(input.value, '');
+  await app.advance(60000);
+  assert.equal(app.calls.length, 1);
+});
+
+test('manual scoring restores a cleared answer visibly as an inferred guess and clears stale completion status', async () => {
   const app = await ui();
   await app.prepare(task);
   await app.recommend();
@@ -197,9 +215,60 @@ test('a cleared answer can continue as Unknown and editing removes stale complet
   assert.equal(app.$('status').textContent, '');
   await app.recommend();
   const answer = app.calls.at(-1).body.intake.answers[0];
-  assert.equal(answer.answer, 'Unknown');
-  assert.equal(answer.status, 'unknown');
-  assert.equal(answer.evidence, '');
+  assert.equal(answer.answer, draft().answers[0].answer);
+  assert.equal(answer.status, 'inferred');
+  assert.equal(answer.evidence, 'Default assumption; please edit if it does not fit.');
+  assert.equal(input.value, answer.answer);
+  assert.equal(app.$('intake-status-expertise').textContent, 'Best guess');
+  assert.equal(app.calls.filter(call => call.path === '/api/intake').length, 1);
+});
+
+test('blurring a cleared field restores its original model guess without altering other edits or resuming scoring', async () => {
+  const app = await ui();
+  await app.prepare(task);
+  const [expertise, audience] = app.fields();
+  audience.value = 'I am building for experienced Go players.'; audience.listeners.input();
+  expertise.value = 'My temporary edit'; expertise.listeners.input();
+  expertise.value = ''; expertise.listeners.input();
+  assert.equal(expertise.value, '');
+  assert.equal(app.fields()[0], expertise);
+  expertise.listeners.blur();
+  assert.equal(expertise.value, draft().answers[0].answer);
+  assert.equal(app.state().intakeAnswers[0].status, 'inferred');
+  assert.equal(app.$('intake-status-expertise').textContent, 'Best guess');
+  assert.equal(audience.value, 'I am building for experienced Go players.');
+  assert.equal(app.state().intakeAnswers[1].status, 'edited');
+  assert.equal(app.fields()[1], audience);
+  assert.equal(app.$('recommend').textContent, 'See my scores · paused');
+  await app.advance(60000);
+  assert.equal(app.calls.length, 1);
+  await app.recommend();
+  assert.equal(app.calls[1].body.intake.answers[0].answer, expertise.value);
+  assert.equal(app.calls[1].body.intake.answers[1].answer, audience.value);
+  assert.equal(app.calls[1].body.intake.answers[1].status, 'edited');
+});
+
+test('blurring a nonempty edit keeps its text and provenance', async () => {
+  const app = await ui();
+  await app.prepare(task);
+  const input = app.fields()[1];
+  input.value = '  My answer  '; input.listeners.input(); input.listeners.blur();
+  assert.equal(input.value, '  My answer  ');
+  assert.equal(app.state().intakeAnswers[1].answer, input.value);
+  assert.equal(app.state().intakeAnswers[1].status, 'edited');
+  assert.equal(app.state().intakeAnswers[1].evidence, '');
+});
+
+test('a cleared answer uses its question default when the original guess is unavailable', async () => {
+  const app = await ui();
+  await app.prepare(task);
+  vm.runInContext('intakeGuesses.delete("expertise")', app.context);
+  const input = app.fields()[0];
+  input.value = ''; input.listeners.input(); input.listeners.blur();
+  assert.equal(input.value, questions[0].defaultAnswer);
+  assert.equal(app.state().intakeAnswers[0].answer, questions[0].defaultAnswer);
+  assert.equal(app.state().intakeAnswers[0].status, 'inferred');
+  assert.equal(app.calls.length, 1);
 });
 
 test('a scoring failure preserves edited answers and retries only scoring', async () => {

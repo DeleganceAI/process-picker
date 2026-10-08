@@ -1,13 +1,13 @@
 // Deliberately authored test fixture, not an LLM-generated recommendation.
 export const sampleTask = 'Redesign an uncertain subsystem with human review, local models, reusable phases, and strict limits. Tests cover regressions but not architectural fit.';
 export const sampleIntake = { answers: [
-  { id: 'expertise', answer: 'Unknown', status: 'unknown', evidence: '' },
-  { id: 'audience', answer: 'Unknown', status: 'unknown', evidence: '' },
-  { id: 'consequences', answer: 'Unknown', status: 'unknown', evidence: '' },
+  { id: 'expertise', answer: 'Assume I am new to the domain and need help evaluating the work.', status: 'inferred', evidence: 'Default assumption; please edit if it does not fit.' },
+  { id: 'audience', answer: 'The subsystem maintainers are the likely audience.', status: 'inferred', evidence: 'The work is a subsystem redesign.' },
+  { id: 'consequences', answer: 'A poor redesign could introduce regressions or require rework; wider impacts need checking.', status: 'inferred', evidence: 'The task changes an existing subsystem.' },
   { id: 'checks', answer: 'Regression tests and human review; architectural fit needs judgment.', status: 'stated', evidence: 'Tests cover regressions but not architectural fit.' },
   { id: 'uncertainty', answer: 'The direction is uncertain.', status: 'stated', evidence: 'Redesign an uncertain subsystem' },
-  { id: 'resources', answer: 'Strict limits are wanted; exact time and spend limits are unknown.', status: 'stated', evidence: 'strict limits' },
-  { id: 'oversight', answer: 'Human review is wanted; reviewer availability is unknown.', status: 'stated', evidence: 'human review' },
+  { id: 'resources', answer: 'Keep the work within strict limits.', status: 'stated', evidence: 'strict limits' },
+  { id: 'oversight', answer: 'Human review is part of the work.', status: 'stated', evidence: 'human review' },
   { id: 'constraints', answer: 'Use local models.', status: 'stated', evidence: 'local models' },
   { id: 'reuse', answer: 'A repeatable process is likely useful.', status: 'inferred', evidence: 'reusable phases' }
 ] };
