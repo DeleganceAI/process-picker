@@ -1,6 +1,8 @@
 import { radar } from './radar.js';
 import { revealScores } from './reveal.mjs';
 import { usageNotice } from './usage.mjs';
+import { countdown } from './countdown.mjs';
+import { closestProfiles } from './similarity.mjs';
 
 const $ = id => document.getElementById(id);
 const make = (tag, text, className) => {
@@ -11,6 +13,52 @@ const make = (tag, text, className) => {
 };
 let catalog, config, session, activeReveal, activeRequest, busy = false, authBusy = true, authFailed = false;
 let intakeQuestions = [], intakeAnswers = null, intakeTask = '', busyStage = '';
+let activeAdvance = null, advanceStage = '', advancePaused = false, resultData = null;
+
+function stopAdvance() {
+  activeAdvance?.cancel(); activeAdvance = null; advanceStage = '';
+}
+function pauseAdvance() { activeAdvance?.pause(); }
+function startAdvance(stage, paused = false) {
+  stopAdvance(); advanceStage = stage;
+  const button = $(stage === 'review' ? 'recommend' : 'show-process');
+  const pause = $(stage === 'review' ? 'pause-review' : 'pause-scores');
+  const label = stage === 'review' ? 'See my scores' : 'See my approach';
+  activeAdvance = countdown(7, state => {
+    advancePaused = state.paused;
+    button.textContent = state.paused ? `${label} · paused` : `${label} in ${state.remaining}s`;
+    pause.textContent = state.paused ? 'Resume' : 'Pause';
+  }, () => {
+    activeAdvance = null; advanceStage = '';
+    if (document.hidden) { startAdvance(stage, true); return; }
+    if (stage === 'review') {
+      if (ready() && $('intake-review').open) recommendTask().catch(showError);
+    } else showApproach();
+  });
+  if (paused || document.hidden) activeAdvance.pause();
+}
+function toggleAdvance() { if (advancePaused) activeAdvance?.resume(); else pauseAdvance(); }
+function closeReview() { pauseAdvance(); $('intake-review').close(); }
+function openReview() {
+  $('intake-review').showModal();
+  $('intake-title').focus({ preventScroll: true });
+  startAdvance('review', true);
+}
+function showApproach() {
+  if (!resultData) return;
+  stopAdvance();
+  $('score-stage').hidden = true; $('approach-stage').hidden = false;
+  $('result').setAttribute('aria-labelledby', 'result-title');
+  $('result-title').focus({ preventScroll: true });
+  $('result').scrollIntoView({ block: 'start' });
+}
+function showScores() {
+  stopAdvance();
+  $('score-stage').hidden = false; $('approach-stage').hidden = true;
+  $('result').setAttribute('aria-labelledby', 'profile-title');
+  $('profile-title').focus({ preventScroll: true });
+  startAdvance('scores', true);
+}
 
 async function request(path, body, signal) {
   const response = await fetch(path, body === undefined ? { signal } : {
@@ -60,10 +108,12 @@ function renderConnection() {
   for (const id of ['source', 'account', 'account-login', 'login', 'logout', 'retry-auth']) $(id).disabled = locked || !catalog;
   $('model').disabled = locked || !hasPlan || $('model').options.length < 2;
   $('analyze').disabled = !ready();
-  $('analyze').hidden = Boolean(intakeAnswers);
-  $('analyze').textContent = busy ? 'Reading your task…' : 'Check my task';
+  $('analyze').textContent = busy ? 'Reading your task…' : intakeAnswers ? 'Review my task' : 'Check my task';
   $('recommend').disabled = !ready() || !intakeAnswers;
-  $('recommend').textContent = busyStage === 'recommend' ? activeReveal ? 'Revealing scores…' : 'Finding your approach…' : 'Find my approach';
+  if (advanceStage !== 'review') $('recommend').textContent = busyStage === 'recommend' ? 'Finding your approach…' : 'See my scores';
+  $('pause-review').disabled = busy;
+  $('close-review').disabled = busy;
+  for (const id of ['edit-task', 'review-answers']) $(id).disabled = busy;
   for (const input of $('intake-fields').querySelectorAll('textarea')) input.readOnly = busy;
   $('account-status').textContent = authBusy ? 'Checking sign-in…' : session?.signedIn ?
     `${session.account?.label || 'Signed in'}${hasPlan ? '' : ' · ChatGPT plan access was not enabled.'}` : 'Sign in to use your ChatGPT plan.';
@@ -158,10 +208,16 @@ function renderRecommendation(data) {
   $('result-title').textContent = approach.title;
   $('reason').textContent = data.reason;
   $('steps').replaceChildren(list('How to get started', data.steps, true));
-  $('chart').replaceChildren(radar(catalog.dimensions, [
-    { label: 'Your suggested process', scores: Object.fromEntries(data.profile.map(p => [p.id, p.score])), color: '#16834b' },
-    { label: approach.title + ' · reference', scores: Object.fromEntries(catalog.dimensions.map(d => [d.id, approach.ratings[d.id].score])), color: '#315ce8', dashed: true }
-  ], 'Your suggested process compared with ' + approach.title));
+  const custom = { label: 'Your task’s suggested process', scores: Object.fromEntries(data.profile.map(p => [p.id, p.score])), color: '#16834b' };
+  $('chart').replaceChildren(radar(catalog.dimensions, [custom], 'Your task’s custom process profile'));
+  $('similar-charts').replaceChildren(...closestProfiles(catalog.dimensions, catalog.approaches, data.profile).map(({ approach: reference, gap }) => {
+    const card = make('article', undefined, 'similar-card');
+    card.append(make('h4', reference.title), make('p', `Average score gap: ${Math.round(gap)} / 100`, 'profile-gap'));
+    card.append(radar(catalog.dimensions, [custom, {
+      label: reference.title + ' · reference', scores: Object.fromEntries(catalog.dimensions.map(d => [d.id, reference.ratings[d.id].score])), color: '#315ce8', dashed: true
+    }], 'Your suggested process compared with ' + reference.title));
+    return card;
+  }));
 
   const details = $('reasoning-content'); details.replaceChildren(); $('reasoning').open = false;
   details.append(make('h3', 'The task'), make('p', data.summary), make('h3', 'The tradeoff'), make('p', data.tradeoff));
@@ -197,12 +253,17 @@ async function showResult(data, signal) {
     value.append(number, make('span', ' / 100', 'score-max'));
     const track = make('div', undefined, 'score-track'); track.setAttribute('aria-hidden', 'true');
     const bar = make('div', undefined, 'score-bar'); track.append(bar);
-    row.append(name, value, track);
+    row.append(name, value, track, make('dd', rating.reason, 'score-explanation'));
     return { row, number, bar, rating };
   });
   $('scores').replaceChildren(...rows.map(item => item.row));
   $('result').classList.remove('is-complete');
   $('result').hidden = false;
+  $('composer').hidden = true;
+  $('intake-review').close();
+  $('score-stage').hidden = false; $('approach-stage').hidden = true;
+  $('score-actions').hidden = true;
+  $('result').setAttribute('aria-labelledby', 'profile-title');
   $('chart-wait').hidden = false;
   $('reveal-count').textContent = `0 of ${rows.length} dimensions`;
   for (const id of ['chart', 'download', 'recommendation', 'reasoning']) $(id).hidden = true;
@@ -225,15 +286,17 @@ async function showResult(data, signal) {
   const completed = await reveal.finished;
   if (activeReveal === reveal) activeReveal = null;
   if (!completed || signal.aborted) return false;
-  const skipped = document.activeElement === $('show-all');
   $('show-all').hidden = true;
+  resultData = data;
   renderRecommendation(data);
   $('result').classList.add('is-complete');
-  if (skipped) $('result-title').focus({ preventScroll: true });
+  $('score-actions').hidden = false;
+  startAdvance('scores');
   return true;
 }
 
 function showError(error) {
+  pauseAdvance();
   $('status').className = 'error'; $('status').textContent = error.message;
   $('review-error').textContent = intakeAnswers ? error.message : '';
   $('usage-error').hidden = $('source').value !== 'chatgpt' || error.code !== 'subscription_sharing_usage_limit_exceeded';
@@ -241,7 +304,8 @@ function showError(error) {
 function invalidateIntake() {
   if (intakeTask && $('task').value !== intakeTask) {
     intakeTask = ''; intakeAnswers = null;
-    $('intake-review').hidden = true;
+    stopAdvance(); resultData = null;
+    $('intake-review').close();
     $('review-error').textContent = '';
     $('result').hidden = true;
     document.querySelector('main').classList.remove('has-result');
@@ -251,7 +315,7 @@ function invalidateIntake() {
   renderConnection();
 }
 
-function renderIntake() {
+function renderIntake(autoAdvance) {
   const fields = intakeQuestions.map(question => {
     const answer = intakeAnswers.find(item => item.id === question.id);
     const field = make('div', undefined, 'intake-field');
@@ -269,10 +333,12 @@ function renderIntake() {
     const help = make('p', answer.evidence || question.hint, 'intake-evidence');
     help.id = `intake-help-${question.id}`;
     input.addEventListener('input', () => {
+      pauseAdvance(); resultData = null;
       answer.answer = input.value;
       answer.status = 'edited'; answer.evidence = '';
       badge.textContent = statuses.edited; help.textContent = question.hint;
       $('result').hidden = true;
+      $('composer').hidden = false;
       $('status').className = ''; $('status').textContent = '';
       $('review-error').textContent = '';
       renderUsage();
@@ -281,17 +347,18 @@ function renderIntake() {
     return field;
   });
   $('intake-fields').replaceChildren(...fields);
-  $('intake-review').hidden = false;
+  $('intake-review').showModal();
   document.querySelector('main').classList.add('has-result');
   $('intake-title').focus({ preventScroll: true });
-  $('intake-review').scrollIntoView({ block: 'start' });
+  startAdvance('review', !autoAdvance);
 }
 
-async function runStage(stage, task) {
+async function runStage(stage, task, autoAdvance = true) {
   if (busy) throw new Error('A request is already running.');
   if (!ready()) throw new Error('Connect your model and choose it before asking for a recommendation.');
   if (typeof task !== 'string' || task.trim().length < 20 || task.length > 8000) throw new Error('Describe your task in 20–8,000 characters.');
   if (stage === 'recommend' && (!intakeAnswers || task !== intakeTask)) throw new Error('Check your task before asking for a recommendation.');
+  stopAdvance(); resultData = null;
   $('task').value = task;
   if (stage === 'intake') invalidateIntake();
   const source = $('source').value, model = $('model').value;
@@ -306,6 +373,7 @@ async function runStage(stage, task) {
   renderUsage(); $('task').readOnly = true; $('input-box').setAttribute('aria-busy', 'true');
   $('intake-form').setAttribute('aria-busy', String(stage === 'recommend'));
   $('result').hidden = true;
+  $('composer').hidden = false;
   $('review-error').textContent = '';
   $('status').className = ''; $('status').textContent = stage === 'intake' ? 'Drafting a few answers from your task. You can edit them before scoring.' : 'Finding an approach using your reviewed answers…';
   try {
@@ -313,12 +381,12 @@ async function runStage(stage, task) {
     if (controller.signal.aborted) return;
     if (stage === 'intake') {
       intakeTask = task; intakeAnswers = data.answers;
-      renderIntake();
+      renderIntake(autoAdvance);
       $('status').textContent = 'Your draft answers are ready. Edit anything, or continue with these assumptions.';
       return { reviewRequired: true, answers: intakeAnswers };
     }
     if (!await showResult(data, controller.signal)) return;
-    $('status').textContent = `All seven scores are revealed. Recommended approach: ${$('result-title').textContent}.`;
+    $('status').textContent = 'All seven scores are ready. Your recommendation is next.';
     return data;
   } catch (error) {
     if (controller.signal.aborted) return;
@@ -326,6 +394,7 @@ async function runStage(stage, task) {
       session = null; $('model').value = ''; authFailed = true;
     }
     showError(error);
+    if (stage === 'recommend') startAdvance('review', true);
     throw error;
   } finally {
     if (activeRequest === controller) activeRequest = null;
@@ -334,17 +403,32 @@ async function runStage(stage, task) {
     $('intake-form').setAttribute('aria-busy', 'false');
   }
 }
-function prepareTask(task) { return runStage('intake', task); }
+function prepareTask(task, { autoAdvance = true } = {}) { return runStage('intake', task, autoAdvance); }
 function recommendTask() { return runStage('recommend', $('task').value); }
 
 async function init() {
   $('task').addEventListener('input', invalidateIntake);
   $('show-all').addEventListener('click', () => activeReveal?.showAll());
   window.addEventListener('pagehide', () => {
+    stopAdvance();
     activeRequest?.abort(); activeReveal?.cancel();
   });
-  $('source').addEventListener('change', () => { $('status').textContent = ''; $('review-error').textContent = ''; $('usage-error').hidden = true; renderConnection(); });
-  $('model').addEventListener('change', () => { $('status').textContent = ''; $('review-error').textContent = ''; renderConnection(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) pauseAdvance(); });
+  $('intake-fields').addEventListener('focusin', pauseAdvance);
+  $('intake-fields').addEventListener('wheel', pauseAdvance, { passive: true });
+  $('intake-fields').addEventListener('touchstart', pauseAdvance, { passive: true });
+  $('source').addEventListener('change', () => { pauseAdvance(); $('status').textContent = ''; $('review-error').textContent = ''; $('usage-error').hidden = true; renderConnection(); });
+  $('model').addEventListener('change', () => { pauseAdvance(); $('status').textContent = ''; $('review-error').textContent = ''; renderConnection(); });
+  $('pause-review').addEventListener('click', toggleAdvance);
+  $('pause-scores').addEventListener('click', toggleAdvance);
+  $('close-review').addEventListener('click', closeReview);
+  $('intake-review').addEventListener('cancel', event => { event.preventDefault(); if (!busy) closeReview(); });
+  $('show-process').addEventListener('click', showApproach);
+  $('back-scores').addEventListener('click', showScores);
+  $('review-answers').addEventListener('click', openReview);
+  $('edit-task').addEventListener('click', () => {
+    stopAdvance(); $('result').hidden = true; $('composer').hidden = false; $('task').focus();
+  });
   $('login').addEventListener('click', () => login());
   $('account-login').addEventListener('click', () => login());
   $('retry-auth').addEventListener('click', refreshAuth);
@@ -363,7 +447,7 @@ async function init() {
   $('download').addEventListener('click', () => download('process-radar.svg', new XMLSerializer().serializeToString($('chart').firstChild), 'image/svg+xml'));
   $('task-form').addEventListener('submit', event => {
     event.preventDefault();
-    if (!busy && !intakeAnswers) prepareTask($('task').value).catch(showError);
+    if (!busy) { if (intakeAnswers) openReview(); else prepareTask($('task').value).catch(showError); }
   });
   $('intake-form').addEventListener('submit', event => {
     event.preventDefault();
@@ -382,10 +466,10 @@ async function init() {
     const lifecycle = new AbortController();
     Promise.resolve(context.registerTool({
       name: 'prepare_process', title: 'Prepare a process recommendation',
-      description: 'Draft editable answers about a task using the model and funding source selected in the page. Opens a review screen; the user must click Find my approach to score and recommend a process. This tool never scores. Uses ChatGPT plan allowance or configured endpoint credentials. Requires sign-in/model setup first.',
+      description: 'Draft editable answers about a task using the selected model and funding source. Opens a paused review; the user must continue or resume the countdown to score. This tool never starts scoring automatically. Uses ChatGPT plan allowance or configured endpoint credentials. Requires sign-in/model setup first.',
       inputSchema: { type: 'object', properties: { task: { type: 'string', minLength: 20, maxLength: 8000 } }, required: ['task'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: true },
-      execute: async input => prepareTask(input?.task)
+      execute: async input => prepareTask(input?.task, { autoAdvance: false })
     }, { signal: lifecycle.signal })).catch(() => {});
     window.addEventListener('pagehide', () => lifecycle.abort(), { once: true });
   }

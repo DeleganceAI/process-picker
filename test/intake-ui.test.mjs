@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { setImmediate } from 'node:timers/promises';
 import vm from 'node:vm';
+import { countdown } from '../public/countdown.mjs';
+import { revealScores } from '../public/reveal.mjs';
+import { sampleResult } from './fixtures.mjs';
 
 const source = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8'))
   .replace(/^import .*;\n/gm, '').replace(/init\(\)\.catch\(showError\);\s*$/, '');
@@ -9,62 +13,105 @@ const ids = ['expertise', 'audience', 'consequences', 'checks', 'uncertainty', '
 const questions = ids.map(id => ({ id, label: id, question: `Question about ${id}?`, hint: `Hint about ${id}.` }));
 const draft = () => ({ answers: ids.map((id, i) => ({ id, answer: i ? 'Not specified' : 'A domain expert', status: i ? 'unknown' : 'stated', evidence: i ? '' : 'The user said so.' })) });
 const task = 'I want to build a mobile game based on Go.';
+const catalog = JSON.parse(await readFile(new URL('../data/catalog.json', import.meta.url), 'utf8'));
 
-function ui() {
-  const elements = new Map();
+async function ui({ realResult = false } = {}) {
+  const elements = new Map(), timers = new Map(), tools = [];
+  let time = 0, nextTimer = 0;
+  const clock = {
+    now: () => time,
+    setTimeout(callback, delay) { const id = ++nextTimer; timers.set(id, { at: time + delay, callback }); return id; },
+    clearTimeout(id) { timers.delete(id); }
+  };
   const element = tag => ({
-    tag, value: '', textContent: '', children: [], hidden: false, disabled: false, listeners: {}, style: {},
+    tag, value: '', textContent: '', children: [], hidden: false, open: false, disabled: false, listeners: {}, style: {},
     classList: { add() {}, remove() {} },
     setAttribute(name, value) { this[name] = value; },
     append(...children) { this.children.push(...children); },
     replaceChildren(...children) { this.children = children; },
     addEventListener(name, listener) { this.listeners[name] = listener; },
     focus() { this.focused = true; }, scrollIntoView() {},
+    showModal() { this.open = true; }, close() { this.open = false; },
     querySelectorAll(tag) { return this.children.flatMap(child => [...(child.tag === tag ? [child] : []), ...child.querySelectorAll(tag)]); }
   });
   const $ = id => {
     if (!elements.has(id)) elements.set(id, element('div'));
     return elements.get(id);
   };
+  const document = {
+    hidden: false, listeners: {}, getElementById: $, createElement: element, querySelector: () => $('main'),
+    addEventListener(name, listener) { this.listeners[name] = listener; },
+    modelContext: { registerTool(tool) { tools.push(tool); } }
+  };
   const context = vm.createContext({
-    document: { getElementById: $, createElement: element, querySelector: () => $('main') },
-    AbortController, structuredClone
+    document, window: { location: { href: 'http://localhost/' }, addEventListener() {}, matchMedia: () => ({ matches: true }) },
+    AbortController, structuredClone, URL, revealScores,
+    countdown: (seconds, tick, complete) => countdown(seconds, tick, complete, clock)
   });
   vm.runInContext(source, context);
   context.ready = () => true;
   context.renderConnection = () => {};
   context.renderUsage = () => {};
-  context.showResult = async () => { $('result').hidden = false; return true; };
-  context.questions = questions;
-  vm.runInContext('intakeQuestions = questions;', context);
+  context.refreshAuth = async () => {};
+  if (realResult) context.renderRecommendation = () => {};
+  else context.showResult = async () => {
+    $('result').hidden = false; $('composer').hidden = true; $('intake-review').close(); return true;
+  };
   $('source').value = 'chatgpt'; $('model').value = 'gpt-5.5';
   const calls = [];
-  context.request = async (path, body) => { calls.push({ path, body }); return draft(); };
+  context.request = async (path, body) => {
+    if (path === '/api/intake/questions') return { questions };
+    if (path === '/api/catalog') return catalog;
+    if (path === '/api/config') return {};
+    calls.push({ path, body }); return path === '/api/intake' ? draft() : structuredClone(sampleResult);
+  };
+  $('result').hidden = true;
+  await context.init();
   return {
-    $, context, calls,
-    prepare: input => context.prepareTask(input),
+    $, context, calls, document, tools,
+    prepare: (input, options) => context.prepareTask(input, options),
     recommend: () => context.recommendTask(),
     fields: () => $('intake-fields').querySelectorAll('textarea'),
-    state: () => vm.runInContext('({ intakeAnswers, intakeTask, busy, busyStage })', context),
-    editTask(input) { $('task').value = input; context.invalidateIntake(); }
+    state: () => vm.runInContext('({ intakeAnswers, intakeTask, busy, busyStage, advanceStage, advancePaused })', context),
+    editTask(input) { $('task').value = input; $('task').listeners.input(); },
+    event(id, name = 'click') { $(id).listeners[name]({ preventDefault() {} }); },
+    async advance(milliseconds) {
+      const end = time + milliseconds;
+      while (true) {
+        const next = [...timers].sort((a, b) => a[1].at - b[1].at)[0];
+        if (!next || next[1].at > end) break;
+        time = next[1].at; timers.delete(next[0]); next[1].callback();
+      }
+      time = end;
+      await setImmediate();
+    }
   };
 }
 
-test('preparing the task reveals editable answers and never starts scoring automatically', async () => {
-  const app = ui();
+test('the UI opens editable answers and starts scoring exactly once after seven seconds', async () => {
+  const app = await ui();
   const response = await app.prepare(task);
   assert.equal(response.reviewRequired, true);
   assert.deepEqual(app.calls.map(call => call.path), ['/api/intake']);
-  assert.equal(app.$('intake-review').hidden, false);
+  assert.equal(app.$('intake-review').open, true);
   assert.equal(app.$('intake-title').focused, true);
   assert.equal(app.fields().length, 9);
   assert.ok(app.fields().every(input => input.maxLength === 600));
   assert.equal(app.$('result').hidden, true);
   assert.equal(app.state().busy, false);
+  assert.equal(app.$('recommend').textContent, 'See my scores in 7s');
+  await app.advance(6999);
+  assert.equal(app.calls.length, 1);
+  await app.advance(1);
+  assert.deepEqual(app.calls.map(call => call.path), ['/api/intake', '/api/recommend']);
+  assert.equal(app.$('intake-review').open, false);
+  assert.equal(app.$('result').hidden, false);
+  await app.advance(60000);
+  assert.equal(app.calls.length, 2);
 });
 
 test('continuing accepts unknown defaults and snapshots the selected source and model', async () => {
-  const app = ui();
+  const app = await ui();
   await app.prepare(task);
   app.$('model').value = 'another-model';
   await app.recommend();
@@ -72,7 +119,10 @@ test('continuing accepts unknown defaults and snapshots the selected source and 
   assert.equal(app.calls[1].path, '/api/recommend');
   assert.equal(app.calls[1].body.model, 'another-model');
   assert.equal(app.calls[1].body.intake.answers[1].status, 'unknown');
+  assert.equal(app.calls[1].body.intake.answers[1].answer, 'Not specified');
+  assert.equal(app.calls[1].body.intake.answers[1].evidence, '');
   assert.equal(app.calls[1].body.intake.answers[0].status, 'stated');
+  assert.equal(app.calls[1].body.intake.answers[0].evidence, 'The user said so.');
   assert.equal(app.$('result').hidden, false);
   app.$('source').value = 'endpoint';
   await app.recommend();
@@ -82,9 +132,10 @@ test('continuing accepts unknown defaults and snapshots the selected source and 
 });
 
 test('editing answers clears inference evidence and hides stale scores without another intake call', async () => {
-  const app = ui();
+  const app = await ui();
   await app.prepare(task);
   await app.recommend();
+  app.event('review-answers');
   const input = app.fields()[0]; input.value = 'I am new to this domain.'; input.listeners.input();
   const answer = app.state().intakeAnswers[0];
   assert.equal(answer.answer, input.value);
@@ -92,26 +143,31 @@ test('editing answers clears inference evidence and hides stale scores without a
   assert.equal(answer.evidence, '');
   assert.equal(app.$('result').hidden, true);
   assert.equal(app.$('intake-fields').children[0].children[0].children[1].textContent, 'Your edit');
+  assert.equal(app.$('recommend').textContent, 'See my scores · paused');
+  await app.advance(60000);
+  assert.equal(app.calls.length, 2);
   await app.recommend();
   assert.equal(app.calls.length, 3);
   assert.equal(app.calls[2].body.intake.answers[0].answer, input.value);
 });
 
 test('editing the task invalidates the review and requires new intake before scoring', async () => {
-  const app = ui();
+  const app = await ui();
   await app.prepare(task);
   app.editTask(`${task} It will handle private customer data.`);
   assert.equal(app.state().intakeAnswers, null);
-  assert.equal(app.$('intake-review').hidden, true);
+  assert.equal(app.$('intake-review').open, false);
   assert.equal(app.$('result').hidden, true);
   await assert.rejects(app.recommend(), /Check your task/);
+  assert.equal(app.calls.length, 1);
+  await app.advance(60000);
   assert.equal(app.calls.length, 1);
   await app.prepare(app.$('task').value);
   assert.equal(app.calls.length, 2);
 });
 
 test('a cleared answer can continue as Unknown and editing removes stale completion status', async () => {
-  const app = ui();
+  const app = await ui();
   await app.prepare(task);
   await app.recommend();
   assert.match(app.$('status').textContent, /All seven scores/);
@@ -125,7 +181,7 @@ test('a cleared answer can continue as Unknown and editing removes stale complet
 });
 
 test('a scoring failure preserves edited answers and retries only scoring', async () => {
-  const app = ui();
+  const app = await ui();
   await app.prepare(task);
   const input = app.fields()[0]; input.value = 'Domain beginner'; input.listeners.input();
   let attempts = 0;
@@ -137,8 +193,11 @@ test('a scoring failure preserves edited answers and retries only scoring', asyn
   await assert.rejects(app.recommend(), /Temporary failure/);
   assert.equal(app.$('review-error').textContent, 'Temporary failure');
   assert.equal(app.state().busy, false);
-  assert.equal(app.$('intake-review').hidden, false);
+  assert.equal(app.$('intake-review').open, true);
   assert.equal(app.fields()[0].value, 'Domain beginner');
+  assert.equal(app.$('recommend').textContent, 'See my scores · paused');
+  await app.advance(60000);
+  assert.equal(app.calls.length, 2);
   await app.recommend();
   assert.equal(app.$('review-error').textContent, '');
   assert.deepEqual(app.calls.map(call => call.path), ['/api/intake', '/api/recommend', '/api/recommend']);
@@ -146,7 +205,7 @@ test('a scoring failure preserves edited answers and retries only scoring', asyn
 });
 
 test('double-clicks never send a second request and intake failures can be retried', async () => {
-  const app = ui();
+  const app = await ui();
   let reject;
   app.context.request = async (path, body) => {
     app.calls.push({ path, body });
@@ -163,17 +222,194 @@ test('double-clicks never send a second request and intake failures can be retri
   assert.equal(app.calls.length, 2);
 });
 
-test('a new task from the browser tool clears the previous review even when intake fails', async () => {
-  const app = ui();
-  await app.prepare(task);
+test('a new task from the browser tool clears the previous result and restores the composer even when intake fails', async () => {
+  const app = await ui({ realResult: true });
+  await app.tools[0].execute({ task });
+  await app.recommend();
+  assert.equal(app.$('composer').hidden, true);
   app.context.request = async () => { throw new Error('Unavailable'); };
-  await assert.rejects(app.prepare('A different software project for a hospital.'), /Unavailable/);
+  await assert.rejects(app.tools[0].execute({ task: 'A different software project for a hospital.' }), /Unavailable/);
   assert.equal(app.state().intakeAnswers, null);
-  assert.equal(app.$('intake-review').hidden, true);
+  assert.equal(app.$('intake-review').open, false);
+  assert.equal(app.$('composer').hidden, false);
+  assert.equal(app.$('result').hidden, true);
+  await app.advance(60000);
+  assert.equal(app.$('result').hidden, true);
 });
 
-test('the browser tool can only prepare a review, with no recommendation tool exposed', () => {
-  assert.match(source, /name: 'prepare_process'/);
-  assert.match(source, /execute: async input => prepareTask\(input\?\.task\)/);
-  assert.doesNotMatch(source, /name: 'recommend_process'/);
+test('the browser tool opens a paused review and exposes no recommendation tool', async () => {
+  const app = await ui();
+  assert.deepEqual(app.tools.map(tool => tool.name), ['prepare_process']);
+  const response = await app.tools[0].execute({ task });
+  assert.equal(response.reviewRequired, true);
+  assert.equal(app.$('intake-review').open, true);
+  assert.equal(app.$('recommend').textContent, 'See my scores · paused');
+  await app.advance(60000);
+  assert.deepEqual(app.calls.map(call => call.path), ['/api/intake']);
+  app.event('intake-form', 'submit');
+  await app.advance(0);
+  assert.deepEqual(app.calls.map(call => call.path), ['/api/intake', '/api/recommend']);
+});
+
+test('Pause freezes the countdown and Resume continues its remaining time', async () => {
+  const app = await ui();
+  await app.prepare(task);
+  await app.advance(2000);
+  app.event('pause-review');
+  assert.equal(app.$('pause-review').textContent, 'Resume');
+  await app.advance(60000);
+  assert.equal(app.calls.length, 1);
+  app.event('pause-review');
+  assert.equal(app.$('recommend').textContent, 'See my scores in 5s');
+  await app.advance(4999);
+  assert.equal(app.calls.length, 1);
+  await app.advance(1);
+  assert.equal(app.calls.length, 2);
+});
+
+test('reading or editing an answer pauses automatic scoring', async context => {
+  for (const event of ['focusin', 'wheel', 'touchstart', 'input']) await context.test(event, async () => {
+    const app = await ui();
+    await app.prepare(task);
+    await app.advance(1000);
+    if (event === 'input') {
+      const input = app.fields()[0]; input.value = 'I am a beginner.'; input.listeners.input();
+      assert.equal(app.state().intakeAnswers[0].status, 'edited');
+      assert.equal(app.state().intakeAnswers[0].evidence, '');
+    } else app.event('intake-fields', event);
+    assert.equal(app.$('recommend').textContent, 'See my scores · paused');
+    await app.advance(60000);
+    assert.deepEqual(app.calls.map(call => call.path), ['/api/intake']);
+  });
+});
+
+test('closing or escaping the review pauses it, and reopening requires continuation', async context => {
+  for (const viaEscape of [false, true]) await context.test(viaEscape ? 'Escape' : 'Close', async () => {
+    const app = await ui();
+    await app.prepare(task);
+    if (viaEscape) app.event('intake-review', 'cancel');
+    else app.event('close-review');
+    assert.equal(app.$('intake-review').open, false);
+    await app.advance(60000);
+    assert.equal(app.calls.length, 1);
+    app.event('task-form', 'submit');
+    assert.equal(app.$('intake-review').open, true);
+    assert.equal(app.$('recommend').textContent, 'See my scores · paused');
+    await app.advance(60000);
+    assert.equal(app.calls.length, 1);
+  });
+});
+
+test('hiding the page pauses it and returning never silently resumes scoring', async () => {
+  const app = await ui();
+  await app.prepare(task);
+  app.document.hidden = true;
+  app.document.listeners.visibilitychange();
+  await app.advance(60000);
+  assert.equal(app.calls.length, 1);
+  app.document.hidden = false;
+  app.document.listeners.visibilitychange();
+  assert.equal(app.$('recommend').textContent, 'See my scores · paused');
+  await app.advance(60000);
+  assert.equal(app.calls.length, 1);
+});
+
+test('a countdown completing before the hidden event is handled still cannot score', async () => {
+  const app = await ui();
+  await app.prepare(task);
+  await app.advance(6999);
+  app.document.hidden = true;
+  await app.advance(1);
+  assert.equal(app.calls.length, 1);
+  assert.equal(app.$('recommend').textContent, 'See my scores · paused');
+  app.document.hidden = false;
+  await app.advance(60000);
+  assert.equal(app.calls.length, 1);
+});
+
+test('manual Continue cancels the timer and repeated submits send only one scoring request', async () => {
+  const app = await ui();
+  await app.prepare(task);
+  await app.advance(6999);
+  let resolve;
+  app.context.request = async (path, body) => {
+    app.calls.push({ path, body });
+    return new Promise(done => { resolve = done; });
+  };
+  app.event('intake-form', 'submit');
+  app.event('intake-form', 'submit');
+  await app.advance(60000);
+  assert.equal(app.calls.length, 2);
+  assert.equal(app.state().busy, true);
+  resolve({});
+  await app.advance(0);
+  assert.equal(app.state().busy, false);
+  await app.advance(60000);
+  assert.equal(app.calls.length, 2);
+});
+
+test('an automatic scoring failure leaves the review paused for an explicit retry', async () => {
+  const app = await ui();
+  await app.prepare(task);
+  app.context.request = async (path, body) => {
+    app.calls.push({ path, body });
+    throw new Error('Temporary failure');
+  };
+  await app.advance(7000);
+  assert.equal(app.$('review-error').textContent, 'Temporary failure');
+  assert.equal(app.$('intake-review').open, true);
+  assert.equal(app.$('recommend').textContent, 'See my scores · paused');
+  assert.equal(app.state().busy, false);
+  await app.advance(60000);
+  assert.deepEqual(app.calls.map(call => call.path), ['/api/intake', '/api/recommend']);
+});
+
+test('a failed rerun after reviewing completed results restores the composer when the dialog closes', async () => {
+  const app = await ui({ realResult: true });
+  await app.prepare(task);
+  await app.recommend();
+  assert.equal(app.$('composer').hidden, true);
+  assert.equal(app.$('result').hidden, false);
+  app.event('review-answers');
+  app.context.request = async (path, body) => { app.calls.push({ path, body }); throw new Error('Try again'); };
+  await assert.rejects(app.recommend(), /Try again/);
+  assert.equal(app.$('composer').hidden, false);
+  assert.equal(app.$('result').hidden, true);
+  app.event('close-review');
+  assert.equal(app.$('intake-review').open, false);
+  assert.equal(app.$('composer').hidden, false);
+  await app.advance(60000);
+  assert.equal(app.calls.length, 3);
+});
+
+test('completed scores get their own seven-second approach transition, with paused Back navigation', async () => {
+  const app = await ui({ realResult: true });
+  await app.prepare(task);
+  await app.recommend();
+  assert.equal(app.$('intake-review').open, false);
+  assert.equal(app.$('composer').hidden, true);
+  assert.equal(app.$('scores').children.length, 7);
+  assert.equal(app.$('reveal-count').textContent, '7 of 7 dimensions');
+  assert.equal(app.$('show-all').hidden, true);
+  assert.equal(app.$('score-stage').hidden, false);
+  assert.equal(app.$('approach-stage').hidden, true);
+  assert.equal(app.$('profile-title').focused, true);
+  assert.equal(app.$('result')['aria-labelledby'], 'profile-title');
+  assert.equal(app.$('show-process').textContent, 'See my approach in 7s');
+  await app.advance(6999);
+  assert.equal(app.$('approach-stage').hidden, true);
+  await app.advance(1);
+  assert.equal(app.$('score-stage').hidden, true);
+  assert.equal(app.$('approach-stage').hidden, false);
+  assert.equal(app.$('result-title').focused, true);
+  assert.equal(app.$('result')['aria-labelledby'], 'result-title');
+  app.event('back-scores');
+  assert.equal(app.$('score-stage').hidden, false);
+  assert.equal(app.$('approach-stage').hidden, true);
+  assert.equal(app.$('show-process').textContent, 'See my approach · paused');
+  await app.advance(60000);
+  assert.equal(app.$('approach-stage').hidden, true);
+  app.event('show-process');
+  assert.equal(app.$('approach-stage').hidden, false);
+  assert.deepEqual(app.calls.map(call => call.path), ['/api/intake', '/api/recommend']);
 });

@@ -28,7 +28,8 @@ test('usage notice names model and calls out variable usage and no retries', () 
   const notice = usageNotice({ intakeInstructionCharacters: 4000, instructionCharacters: 16000, task: 'a task', source: 'chatgpt', model: ' GPT-5.5 ' });
   assert.equal(notice.summary, 'GPT-5.5 · ~1,100 input tokens + reply/reasoning · call 1 of 2');
   assert.match(notice.detail, /intake instructions and task/);
-  assert.match(notice.detail, /score only after you continue/);
+  assert.match(notice.detail, /continue or the 7-second review countdown finishes/);
+  assert.match(notice.detail, /editing an answer pauses automatically/);
   assert.match(notice.detail, /model and language/);
   assert.match(notice.detail, /No automatic retries/);
   assert.match(notice.detail, /no local output-token cap/);

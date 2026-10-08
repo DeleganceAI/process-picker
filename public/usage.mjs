@@ -25,6 +25,6 @@ export function usageNotice({ instructionCharacters, intakeInstructionCharacters
   }
   return {
     summary: `${modelName} · ${input} + reply/reasoning · call ${reviewing ? 2 : 1} of 2`,
-    detail: `Two AI calls: first draft answers, then score only after you continue. This estimate covers ${reviewing ? 'the scoring instructions, task, and reviewed answers' : 'the intake instructions and task'} for this call, using about 4 characters per token. Actual usage varies by model and language. Reply and reasoning tokens are additional for each call. No automatic retries. ${limit}`
+    detail: `Two AI calls: first draft answers, then score when you continue or the 7-second review countdown finishes. You can pause; editing an answer pauses automatically. This estimate covers ${reviewing ? 'the scoring instructions, task, and reviewed answers' : 'the intake instructions and task'} for this call, using about 4 characters per token. Actual usage varies by model and language. Reply and reasoning tokens are additional for each call. No automatic retries. ${limit}`
   };
 }
