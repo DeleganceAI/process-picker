@@ -128,7 +128,7 @@ function renderConnection() {
   for (const id of ['source', 'account', 'account-login', 'login', 'logout', 'retry-auth']) $(id).disabled = locked || !catalog;
   $('model').disabled = locked || !hasPlan || $('model').options.length < 2;
   $('analyze').disabled = !ready();
-  $('analyze').textContent = busy ? 'Reading your task…' : intakeAnswers ? 'Review my task' : 'Check my task';
+  $('analyze').textContent = busy ? 'Reading your task…' : intakeAnswers ? 'Review my task' : 'Find the optimal AI process';
   $('recommend').disabled = !ready() || !intakeAnswers;
   if (advanceStage !== 'review') $('recommend').textContent = busyStage === 'recommend' ? 'Finding your approach…' : 'See my scores';
   $('pause-review').disabled = busy;
